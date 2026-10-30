@@ -50,7 +50,7 @@ def candles():
             params={
                 "symbol": symbol,
                 "interval": interval,
-                "outputsize": 20,
+                "outputsize": 100,
                 "apikey": API_KEY
             },
             timeout=15
