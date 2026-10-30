@@ -9,7 +9,27 @@ app = Flask(__name__)
 API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 API_URL = "https://api.twelvedata.com/time_series"
 
+DB_NAME = "signals.db"
 
+
+def init_db():
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                interval TEXT NOT NULL,
+                candle_time TEXT NOT NULL,
+                signal TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                result TEXT DEFAULT 'PENDING',
+                created_at TEXT NOT NULL,
+                UNIQUE(symbol, interval, candle_time)
+            )
+        """)
+
+
+init_db()
 @app.route("/")
 def home():
     return jsonify({
