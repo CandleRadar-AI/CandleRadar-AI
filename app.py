@@ -1,4 +1,6 @@
 import os
+import sqlite3
+from datetime import datetime, timedelta, timezone
 import requests
 from flask import Flask, jsonify, request
 
@@ -130,7 +132,6 @@ def analyze_candles(candles):
         "ema20": round(ema20, 5),
         "last_close": close_price
 }
-from datetime import datetime, timedelta, timezone
 
 @app.route("/predict")
 def predict():
