@@ -79,6 +79,56 @@ def candles():
             "message": "Could not connect to market data provider"
         }), 502
 
+def calculate_ema(prices, period=20):
+    ema = prices[0]
+    multiplier = 2 / (period + 1)
 
+    for price in prices[1:]:
+        ema = (price - ema) * multiplier + ema
+
+    return ema
+
+
+def analyze_candles(candles):
+    if len(candles) < 50:
+        return {
+            "signal": "WAIT",
+            "reason": "পর্যাপ্ত ক্যান্ডেল ডেটা নেই"
+        }
+
+    # পুরোনো ক্যান্ডেল আগে
+    candles = sorted(
+        candles,
+        key=lambda c: c["datetime"]
+    )
+
+    # সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ক্যান্ডেল
+    latest = candles[-1]
+
+    closes = [float(c["close"]) for c in candles]
+
+    ema20 = calculate_ema(closes, 20)
+
+    open_price = float(latest["open"])
+    close_price = float(latest["close"])
+
+    if close_price > ema20 and close_price > open_price:
+        signal = "UP"
+        reason = "দাম EMA 20-এর ওপরে এবং শেষ ক্যান্ডেল বুলিশ"
+
+    elif close_price < ema20 and close_price < open_price:
+        signal = "DOWN"
+        reason = "দাম EMA 20-এর নিচে এবং শেষ ক্যান্ডেল বিয়ারিশ"
+
+    else:
+        signal = "WAIT"
+        reason = "মার্কেটের দিক স্পষ্ট নয়"
+
+    return {
+        "signal": signal,
+        "reason": reason,
+        "ema20": round(ema20, 5),
+        "last_close": close_price
+}
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
