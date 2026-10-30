@@ -218,6 +218,21 @@ def predict():
             }), 503
 
         result = analyze_candles(closed)
+        if result["signal"] in ("UP", "DOWN"):
+            with sqlite3.connect(DB_NAME) as conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO signals
+                    (symbol, interval, candle_time, signal,
+                     entry_price, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    symbol,
+                    interval,
+                    max(c["datetime"] for c in closed),
+                    result["signal"],
+                    result["last_close"],
+                    datetime.now(timezone.utc).isoformat()
+                ))
 
         return jsonify({
             "status": "ok",
