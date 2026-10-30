@@ -130,5 +130,89 @@ def analyze_candles(candles):
         "ema20": round(ema20, 5),
         "last_close": close_price
 }
+from datetime import datetime, timedelta, timezone
+
+@app.route("/predict")
+def predict():
+    if not API_KEY:
+        return jsonify({
+            "status": "error",
+            "message": "API key missing"
+        }), 500
+
+    symbol = request.args.get("symbol", "EUR/USD")
+    interval = request.args.get("interval", "1min")
+
+    seconds = {
+        "1min": 60,
+        "5min": 300,
+        "15min": 900
+    }
+
+    if interval not in seconds:
+        return jsonify({
+            "status": "error",
+            "message": "Use 1min, 5min or 15min"
+        }), 400
+
+    try:
+        response = requests.get(
+            API_URL,
+            params={
+                "symbol": symbol,
+                "interval": interval,
+                "outputsize": 100,
+                "apikey": API_KEY,
+                "timezone": "UTC"
+            },
+            timeout=15
+        )
+
+        data = response.json()
+
+        if response.status_code != 200 or "values" not in data:
+            return jsonify({
+                "status": "error",
+                "message": data.get("message", "Data unavailable")
+            }), 502
+
+        now = datetime.now(timezone.utc)
+        duration = timedelta(seconds=seconds[interval])
+
+        closed = []
+
+        for candle in data["values"]:
+            start = datetime.strptime(
+                candle["datetime"],
+                "%Y-%m-%d %H:%M:%S"
+            ).replace(tzinfo=timezone.utc)
+
+            if start + duration <= now:
+                closed.append(candle)
+
+        if len(closed) < 50:
+            return jsonify({
+                "status": "error",
+                "message": "Not enough closed candles"
+            }), 503
+
+        result = analyze_candles(closed)
+
+        return jsonify({
+            "status": "ok",
+            "symbol": symbol,
+            "interval": interval,
+            "last_closed_candle": max(
+                c["datetime"] for c in closed
+            ),
+            "analysis": result,
+            "model": "rule_based_v1"
+        })
+
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return jsonify({
+            "status": "error",
+            "message": "Prediction unavailable"
+        }), 502
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
