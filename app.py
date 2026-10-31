@@ -232,4 +232,5 @@ def predict():
                     max(c["datetime"] for c in closed),
                     result["signal"],
                     result["last_close"],
-                    datetime.now(timezone.ut
+                                        datetime.now(timezone.utc).isoformat()
+                ))
