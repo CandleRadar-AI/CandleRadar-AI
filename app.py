@@ -130,6 +130,62 @@ def get_closed_candles(candles, interval):
     return closed
 
 
+def detect_candle_patterns(candles):
+    if len(candles) < 3:
+        return []
+
+    patterns = []
+
+    a = candles[-3]
+    b = candles[-2]
+    c = candles[-1]
+
+    def values(candle):
+        o = float(candle["open"])
+        h = float(candle["high"])
+        l = float(candle["low"])
+        cl = float(candle["close"])
+        return o, h, l, cl
+
+    o, h, l, cl = values(c)
+
+    body = abs(cl - o)
+    lower_wick = min(o, cl) - l
+    upper_wick = h - max(o, cl)
+
+    # Single candle patterns
+    if body > 0 and lower_wick >= body * 2 and upper_wick <= body:
+        if cl > o:
+            patterns.append("Hammer")
+
+    if body > 0 and upper_wick >= body * 2 and lower_wick <= body:
+        if cl < o:
+            patterns.append("Shooting Star")
+
+    if body <= (h - l) * 0.1 and h > l:
+        patterns.append("Doji")
+
+    # Double candle patterns
+    bo, bh, bl, bc = values(b)
+
+    if bc < bo and cl > o and o <= bc and cl >= bo:
+        patterns.append("Bullish Engulfing")
+
+    if bc > bo and cl < o and o >= bc and cl <= bo:
+        patterns.append("Bearish Engulfing")
+
+    # Multiple candle patterns
+    ao, ah, al, ac = values(a)
+
+    if ac < ao and cl > o and cl > (ao + ac) / 2:
+        if abs(bc - bo) < abs(ac - ao) * 0.5:
+            patterns.append("Morning Star")
+
+    if ac > ao and cl < o and cl < (ao + ac) / 2:
+        if abs(bc - bo) < abs(ac - ao) * 0.5:
+            patterns.append("Evening Star")
+
+    return patterns
 # -------------------------
 # EMA 20 analysis
 # -------------------------
