@@ -4,70 +4,226 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CandleRadar AI</title>
+
+    <style>
+        body {
+            background: #101827;
+            color: white;
+            font-family: Arial, sans-serif;
+            padding: 15px;
+        }
+
+        .box {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+        }
+
+        input, select, button {
+            padding: 12px;
+            margin: 6px 0;
+            border-radius: 7px;
+            border: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #16a34a;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .pair {
+            display: block;
+            padding: 10px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .signal {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+
+        .UP { color: #22c55e; }
+        .DOWN { color: #ef4444; }
+        .WAIT { color: #facc15; }
+    </style>
 </head>
+
 <body>
-    <h1>CandleRadar AI</h1>
 
-    <h3>Forex Pair নির্বাচন করো</h3>
+    <h1>🚀 CandleRadar AI</h1>
+    <p>Forex Market Analysis System</p>
 
-    <input
-        type="text"
-        id="search"
-        placeholder="পেয়ার খুঁজুন..."
-        oninput="searchPairs()"
-    >
+    <div class="box">
+        <h3>Forex Pair নির্বাচন করো</h3>
 
-    <select id="category" onchange="showPairs()">
-        <option value="All">সব পেয়ার</option>
-        <option value="Major">Major</option>
-        <option value="Minor">Minor</option>
-        <option value="Exotic">Exotic</option>
-    </select>
+        <input
+            type="text"
+            id="search"
+            placeholder="পেয়ার খুঁজুন..."
+            oninput="showPairs()"
+        >
 
-    <div id="pairs"></div>
+        <select id="category" onchange="showPairs()">
+            <option value="All">সব পেয়ার</option>
+            <option value="Major">Major</option>
+            <option value="Minor">Minor</option>
+            <option value="Exotic">Exotic</option>
+        </select>
 
-    <script>
-        const forexPairs = [
-            {pair:"EUR/USD", category:"Major"},
-            {pair:"GBP/USD", category:"Major"},
-            {pair:"USD/JPY", category:"Major"},
-            {pair:"USD/CHF", category:"Major"},
-            {pair:"AUD/USD", category:"Major"},
-            {pair:"USD/CAD", category:"Major"},
-            {pair:"NZD/USD", category:"Major"},
-            {pair:"EUR/GBP", category:"Minor"},
-            {pair:"EUR/JPY", category:"Minor"},
-            {pair:"GBP/JPY", category:"Minor"},
-            {pair:"AUD/JPY", category:"Minor"},
-            {pair:"EUR/AUD", category:"Minor"},
-            {pair:"GBP/AUD", category:"Minor"},
-            {pair:"USD/BDT", category:"Exotic"},
-            {pair:"USD/SGD", category:"Exotic"},
-            {pair:"USD/TRY", category:"Exotic"}
-        ];
+        <div id="pairs"></div>
 
-        function showPairs() {
-            const category = document.getElementById("category").value;
-            const search = document.getElementById("search").value.toUpperCase();
+        <h3>Timeframe নির্বাচন</h3>
 
-            const filtered = forexPairs.filter(item =>
-                (category === "All" || item.category === category) &&
-                item.pair.includes(search)
+        <select id="interval">
+            <option value="1min">1 Minute</option>
+            <option value="5min">5 Minutes</option>
+            <option value="15min">15 Minutes</option>
+        </select>
+
+        <button onclick="getSignals()">
+            🔍 GET SIGNALS
+        </button>
+    </div>
+
+    <h2>📊 Signal Results</h2>
+
+    <div id="status"></div>
+    <div id="results"></div>
+
+<script>
+
+const forexPairs = [
+    {pair:"EUR/USD",category:"Major"},
+    {pair:"GBP/USD",category:"Major"},
+    {pair:"USD/JPY",category:"Major"},
+    {pair:"USD/CHF",category:"Major"},
+    {pair:"AUD/USD",category:"Major"},
+    {pair:"USD/CAD",category:"Major"},
+    {pair:"NZD/USD",category:"Major"},
+
+    {pair:"EUR/GBP",category:"Minor"},
+    {pair:"EUR/JPY",category:"Minor"},
+    {pair:"GBP/JPY",category:"Minor"},
+    {pair:"AUD/JPY",category:"Minor"},
+    {pair:"EUR/AUD",category:"Minor"},
+    {pair:"GBP/AUD",category:"Minor"},
+
+    {pair:"USD/SGD",category:"Exotic"},
+    {pair:"USD/TRY",category:"Exotic"}
+];
+
+function showPairs() {
+
+    const category =
+        document.getElementById("category").value;
+
+    const search =
+        document.getElementById("search").value.toUpperCase();
+
+    const filtered = forexPairs.filter(item =>
+        (category === "All" || item.category === category) &&
+        item.pair.includes(search)
+    );
+
+    document.getElementById("pairs").innerHTML =
+        filtered.map(item => `
+            <label class="pair">
+                <input type="checkbox" value="${item.pair}">
+                ${item.pair} (${item.category})
+            </label>
+        `).join("");
+}
+
+async function getSignals() {
+
+    const selected = [
+        ...document.querySelectorAll(
+            '#pairs input:checked'
+        )
+    ].map(item => item.value);
+
+    const interval =
+        document.getElementById("interval").value;
+
+    const results =
+        document.getElementById("results");
+
+    const status =
+        document.getElementById("status");
+
+    if (selected.length === 0) {
+        alert("অন্তত একটি পেয়ার নির্বাচন করো।");
+        return;
+    }
+
+    if (selected.length > 5) {
+        alert("একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করো।");
+        return;
+    }
+
+    results.innerHTML = "";
+    status.innerHTML = "⏳ বিশ্লেষণ চলছে...";
+
+    for (const symbol of selected) {
+
+        const card = document.createElement("div");
+        card.className = "signal";
+
+        card.innerHTML = `
+            <h3>${symbol}</h3>
+            <p>বিশ্লেষণ করা হচ্ছে...</p>
+        `;
+
+        results.appendChild(card);
+
+        try {
+
+            const response = await fetch(
+                `/predict?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
             );
 
-            document.getElementById("pairs").innerHTML = filtered.map(item =>
-                `<label style="display:block;margin:10px">
-                    <input type="checkbox" value="${item.pair}">
-                    ${item.pair} (${item.category})
-                </label>`
-            ).join("");
-        }
+            const data = await response.json();
 
-        function searchPairs() {
-            showPairs();
-        }
+            if (!response.ok || data.status === "error") {
+                throw new Error(data.message || "ডেটা পাওয়া যায়নি");
+            }
 
-        showPairs();
-    </script>
+            const signal = data.signal || "WAIT";
+
+            card.innerHTML = `
+                <h3>${symbol}</h3>
+                <h2 class="${signal}">${signal}</h2>
+                <p>Timeframe: ${interval}</p>
+                <p>${data.analysis?.reason || data.message || ""}</p>
+                <p>EMA 20: ${data.analysis?.ema20 ?? "N/A"}</p>
+                <p>Last Close: ${data.analysis?.last_close ?? "N/A"}</p>
+                <p>Patterns: ${(data.analysis?.patterns || []).join(", ") || "None"}</p>
+            `;
+
+        } catch (error) {
+
+            card.innerHTML = `
+                <h3>${symbol}</h3>
+                <p style="color:#ef4444">
+                    সমস্যা: ${error.message}
+                </p>
+            `;
+        }
+    }
+
+    status.innerHTML = "✅ বিশ্লেষণ সম্পন্ন";
+}
+
+showPairs();
+
+</script>
+
 </body>
 </html>
