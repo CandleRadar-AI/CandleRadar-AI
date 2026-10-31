@@ -207,20 +207,39 @@ def analyze_candles(candles):
     last_close = closes[-1]
     previous_close = closes[-2]
 
-    # Basic rule-based signal, not a guaranteed prediction.
-    if last_close > ema and last_close > previous_close:
-        signal = "UP"
-        reason = "দাম EMA 20-এর ওপরে এবং শেষ ক্লোজ আগের ক্লোজের চেয়ে বেশি।"
+    patterns = detect_candle_patterns(candles)
 
-    elif last_close < ema and last_close < previous_close:
+    bullish_patterns = [
+        "Hammer",
+        "Bullish Engulfing",
+        "Morning Star"
+    ]
+
+    bearish_patterns = [
+        "Shooting Star",
+        "Bearish Engulfing",
+        "Evening Star"
+    ]
+
+    bullish_found = any(
+        p in patterns for p in bullish_patterns
+    )
+
+    bearish_found = any(
+        p in patterns for p in bearish_patterns
+    )
+
+    if last_close > ema and bullish_found:
+        signal = "UP"
+        reason = "EMA 20 এবং Bullish Candle Pattern মিলেছে।"
+
+    elif last_close < ema and bearish_found:
         signal = "DOWN"
-        reason = "দাম EMA 20-এর নিচে এবং শেষ ক্লোজ আগের ক্লোজের চেয়ে কম।"
+        reason = "EMA 20 এবং Bearish Candle Pattern মিলেছে।"
 
     else:
         signal = "WAIT"
-        reason = "মার্কেটের দিক স্পষ্ট নয়।"
-
-    patterns = detect_candle_patterns(candles)
+        reason = "EMA এবং Candle Pattern একমত নয়।"
 
     return {
         "signal": signal,
