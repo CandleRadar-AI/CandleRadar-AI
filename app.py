@@ -232,40 +232,4 @@ def predict():
                     max(c["datetime"] for c in closed),
                     result["signal"],
                     result["last_close"],
-                    datetime.now(timezone.utc).isoformat()
-                ))
-                
-        if result["signal"] in ("UP", "DOWN"):
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("""
-                    INSERT OR IGNORE INTO signals
-                    (symbol, interval, candle_time, signal,
-                     entry_price, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    symbol,
-                    interval,
-                    max(c["datetime"] for c in closed),
-                    result["signal"],
-                    result["last_close"],
-                    datetime.now(timezone.utc).isoformat()
-                ))
-
-        return jsonify({
-            "status": "ok",
-            "symbol": symbol,
-            "interval": interval,
-            "last_closed_candle": max(
-                c["datetime"] for c in closed
-            ),
-            "analysis": result,
-            "model": "rule_based_v1"
-        })
-
-    except (requests.RequestException, ValueError, KeyError, TypeError):
-        return jsonify({
-            "status": "error",
-            "message": "Prediction unavailable"
-        }), 502
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+                    datetime.now(timezone.ut
