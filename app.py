@@ -181,8 +181,10 @@ def predict():
 
         if is_market_closed():
         return jsonify({
-            "status": "market_closed",
-            "signal": "MARKET CLOSED",
+            "status": 
+            "market_closed",
+                     "signal": "MARKET 
+            CLOSED",
             "message": "ফরেক্স মার্কেট এখন বন্ধ। নতুন সিগন্যাল দেওয়া হচ্ছে না।"
         })
     
