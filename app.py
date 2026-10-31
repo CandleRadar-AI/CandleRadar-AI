@@ -194,22 +194,76 @@ def detect_candle_patterns(candles):
 # -------------------------
 
 def analyze_candles(candles):
-    if len(candles) < 50:
-        raise ValueError("Not enough candles for analysis.")
+    if len(candles) < 60:
+        raise ValueError("বিশ্লেষণের জন্য কমপক্ষে ৬০টি ক্যান্ডেল প্রয়োজন।")
 
-    closes = [float(candle["close"]) for candle in candles]
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c["high"]) for c in candles]
+    lows = [float(c["low"]) for c in candles]
 
-    period = 20
-    multiplier = 2 / (period + 1)
+    def calculate_ema(data, period):
+        multiplier = 2 / (period + 1)
+        ema = sum(data[:period]) / period
 
-    ema = sum(closes[:period]) / period
+        for price in data[period:]:
+            ema = price * multiplier + ema * (1 - multiplier)
 
-    for price in closes[period:]:
-        ema = (price * multiplier) + (ema * (1 - multiplier))
+        return ema
+
+    # EMA 20 and EMA 50
+    ema20 = calculate_ema(closes, 20)
+    ema50 = calculate_ema(closes, 50)
+
+    # RSI 14
+    changes = [
+        closes[i] - closes[i - 1]
+        for i in range(1, len(closes))
+    ]
+
+    gains = [max(change, 0) for change in changes[-14:]]
+    losses = [max(-change, 0) for change in changes[-14:]]
+
+    avg_gain = sum(gains) / 14
+    avg_loss = sum(losses) / 14
+
+    if avg_loss == 0:
+        rsi = 100 if avg_gain > 0 else 50
+    else:
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+
+    # MACD 12, 26, 9
+    multiplier12 = 2 / 13
+    multiplier26 = 2 / 27
+
+    ema12 = sum(closes[:12]) / 12
+    ema26 = sum(closes[:26]) / 26
+
+    ema12_values = []
+    ema26_values = []
+
+    for price in closes[12:]:
+        ema12 = price * multiplier12 + ema12 * (1 - multiplier12)
+        ema12_values.append(ema12)
+
+    for price in closes[26:]:
+        ema26 = price * multiplier26 + ema26 * (1 - multiplier26)
+        ema26_values.append(ema26)
+
+    macd_values = [
+        fast - slow
+        for fast, slow in zip(ema12_values[-len(ema26_values):], ema26_values)
+    ]
+
+    macd = macd_values[-1]
+    signal_line = calculate_ema(macd_values, 9)
+    macd_histogram = macd - signal_line
+
+    # Support and Resistance (last 20 candles)
+    support = min(lows[-20:])
+    resistance = max(highs[-20:])
 
     last_close = closes[-1]
-    previous_close = closes[-2]
-
     patterns = detect_candle_patterns(candles)
 
     bullish_patterns = [
@@ -224,30 +278,60 @@ def analyze_candles(candles):
         "Evening Star"
     ]
 
-    bullish_found = any(
-        p in patterns for p in bullish_patterns
-    )
+    bullish_score = 0
+    bearish_score = 0
 
-    bearish_found = any(
-        p in patterns for p in bearish_patterns
-    )
+    if last_close > ema20:
+        bullish_score += 1
+    elif last_close < ema20:
+        bearish_score += 1
 
-    if last_close > ema and bullish_found:
+    if ema20 > ema50:
+        bullish_score += 1
+    elif ema20 < ema50:
+        bearish_score += 1
+
+    if rsi > 50:
+        bullish_score += 1
+    elif rsi < 50:
+        bearish_score += 1
+
+    if macd_histogram > 0:
+        bullish_score += 1
+    elif macd_histogram < 0:
+        bearish_score += 1
+
+    if any(p in patterns for p in bullish_patterns):
+        bullish_score += 1
+
+    if any(p in patterns for p in bearish_patterns):
+        bearish_score += 1
+
+    if bullish_score >= 4 and bullish_score > bearish_score:
         signal = "UP"
-        reason = "EMA 20 এবং Bullish Candle Pattern মিলেছে।"
+        reason = "একাধিক সূচকে Bullish প্রবণতা পাওয়া গেছে।"
 
-    elif last_close < ema and bearish_found:
+    elif bearish_score >= 4 and bearish_score > bullish_score:
         signal = "DOWN"
-        reason = "EMA 20 এবং Bearish Candle Pattern মিলেছে।"
+        reason = "একাধিক সূচকে Bearish প্রবণতা পাওয়া গেছে।"
 
     else:
         signal = "WAIT"
-        reason = "EMA এবং Candle Pattern একমত নয়।"
+        reason = "পর্যাপ্ত মিল পাওয়া যায়নি। অপেক্ষা করো।"
 
     return {
         "signal": signal,
-        "ema20": round(ema, 6),
+        "ema20": round(ema20, 6),
+        "ema50": round(ema50, 6),
+        "rsi": round(rsi, 2),
+        "macd": round(macd, 6),
+        "macd_signal": round(signal_line, 6),
+        "macd_histogram": round(macd_histogram, 6),
+        "support": round(support, 6),
+        "resistance": round(resistance, 6),
         "last_close": last_close,
+        "bullish_score": bullish_score,
+        "bearish_score": bearish_score,
         "reason": reason,
         "patterns": patterns,
     }
