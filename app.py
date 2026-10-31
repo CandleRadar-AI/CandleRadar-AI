@@ -251,6 +251,36 @@ def predict():
             "message": "Prediction unavailable"
         }), 502
 
+@app.route("/stats")
+def stats():
+    with sqlite3.connect(DB_NAME) as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM signals"
+        ).fetchone()[0]
+
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE result = 'PENDING'"
+        ).fetchone()[0]
+
+        wins = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE result = 'WIN'"
+        ).fetchone()[0]
+
+        losses = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE result = 'LOSS'"
+        ).fetchone()[0]
+
+    completed = wins + losses
+    win_rate = round(wins / completed * 100, 2) if completed else 0
+
+    return jsonify({
+        "status": "ok",
+        "total_signals": total,
+        "pending": pending,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
