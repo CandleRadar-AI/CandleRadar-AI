@@ -1,16 +1,26 @@
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
+
 import requests
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-API_KEY = os.getenv("TWELVE_DATA_API_KEY")
+API_KEY = os.getenv("TWELVE_DATA_API_KEY", "").strip()
 API_URL = "https://api.twelvedata.com/time_series"
+DB_NAME = os.getenv("DB_NAME", "signals.db")
 
-DB_NAME = "signals.db"
+ALLOWED_INTERVALS = {
+    "1min": 60,
+    "5min": 300,
+    "15min": 900,
+}
 
+
+# -------------------------
+# Database
+# -------------------------
 
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
@@ -22,7 +32,7 @@ def init_db():
                 candle_time TEXT NOT NULL,
                 signal TEXT NOT NULL,
                 entry_price REAL NOT NULL,
-                result TEXT DEFAULT 'PENDING',
+                result TEXT NOT NULL DEFAULT 'PENDING',
                 created_at TEXT NOT NULL,
                 UNIQUE(symbol, interval, candle_time)
             )
@@ -30,206 +40,82 @@ def init_db():
 
 
 init_db()
-@app.route("/")
-def home():
-    return jsonify({
-        "app": "CandleRadar AI",
-        "status": "online",
-        "message": "AI server is running"
-    })
 
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"})
+# -------------------------
+# Market status
+# -------------------------
 
-
-def is_market_closed():
+def is_forex_market_closed():
+    """
+    Basic forex weekend filter.
+    Uses UTC and approximate 21:00 UTC closing/reopening time.
+    This is not an exact holiday or broker-hours calendar.
+    """
     now = datetime.now(timezone.utc)
-    weekday = now.weekday()
+    weekday = now.weekday()  # Monday=0, Sunday=6
 
-    # Saturday
-    if weekday == 5:
+    if weekday == 5:  # Saturday
         return True
 
-    # Sunday before 22:00 UTC
-    if weekday == 6 and now.hour < 22:
+    if weekday == 4 and now.hour >= 21:  # Friday evening
         return True
 
-    # Friday from 22:00 UTC
-    if weekday == 4 and now.hour >= 22:
+    if weekday == 6 and now.hour < 21:  # Sunday before reopening
         return True
 
     return False
 
-@app.route("/candles")
-def candles():
+
+# -------------------------
+# Fetch candles
+# -------------------------
+
+def fetch_candles(symbol, interval, outputsize=100):
     if not API_KEY:
-        return jsonify({
-            "status": "error",
-            "message": "API key is not configured"
-        }), 500
+        raise ValueError("Twelve Data API key is missing.")
 
-    symbol = request.args.get("symbol", "EUR/USD").upper()
-    interval = request.args.get("interval", "1min")
-
-    allowed_intervals = {
-        "1min", "5min", "15min", "30min",
-        "45min", "1h", "2h", "4h", "1day"
-    }
-
-    if interval not in allowed_intervals:
-        return jsonify({
-            "status": "error",
-            "message": "Unsupported interval"
-        }), 400
-
-    try:
-        response = requests.get(
-            API_URL,
-            params={
-                "symbol": symbol,
-                "interval": interval,
-                "outputsize": 100,
-                "apikey": API_KEY
-            },
-            timeout=15
-        )
-
-        data = response.json()
-
-        if response.status_code != 200 or "values" not in data:
-            return jsonify({
-                "status": "error",
-                "message": data.get(
-                    "message", "Market data unavailable"
-                )
-            }), 502
-
-        return jsonify({
-            "status": "ok",
+    response = requests.get(
+        API_URL,
+        params={
             "symbol": symbol,
             "interval": interval,
-            "candles": data["values"]
-        })
-
-    except requests.RequestException:
-        return jsonify({
-            "status": "error",
-            "message": "Could not connect to market data provider"
-        }), 502
-
-def calculate_ema(prices, period=20):
-    ema = prices[0]
-    multiplier = 2 / (period + 1)
-
-    for price in prices[1:]:
-        ema = (price - ema) * multiplier + ema
-
-    return ema
-
-
-def analyze_candles(candles):
-    if len(candles) < 50:
-        return {
-            "signal": "WAIT",
-            "reason": "পর্যাপ্ত ক্যান্ডেল ডেটা নেই"
-        }
-
-    # পুরোনো ক্যান্ডেল আগে
-    candles = sorted(
-        candles,
-        key=lambda c: c["datetime"]
+            "outputsize": outputsize,
+            "apikey": API_KEY,
+            "timezone": "UTC",
+        },
+        timeout=20,
     )
 
-    # সর্বশেষ সম্পূর্ণ বন্ধ হওয়া ক্যান্ডেল
-    latest = candles[-1]
-
-    closes = [float(c["close"]) for c in candles]
-
-    ema20 = calculate_ema(closes, 20)
-
-    open_price = float(latest["open"])
-    close_price = float(latest["close"])
-
-    if close_price > ema20 and close_price > open_price:
-        signal = "UP"
-        reason = "দাম EMA 20-এর ওপরে এবং শেষ ক্যান্ডেল বুলিশ"
-
-    elif close_price < ema20 and close_price < open_price:
-        signal = "DOWN"
-        reason = "দাম EMA 20-এর নিচে এবং শেষ ক্যান্ডেল বিয়ারিশ"
-
-    else:
-        signal = "WAIT"
-        reason = "মার্কেটের দিক স্পষ্ট নয়"
-
-    return {
-        "signal": signal,
-        "reason": reason,
-        "ema20": round(ema20, 5),
-        "last_close": close_price
-}
-
-@app.route("/predict")
-def predict():
-    if not API_KEY:
-        return jsonify({
-            "status": "error",
-            "message": "API key missing"
-        }), 500
-
-        if is_market_closed():
-        return jsonify({
-            "status": 
-            "market_closed",
-                     "signal": "MARKET 
-            CLOSED",
-            "message": "ফরেক্স মার্কেট এখন বন্ধ। নতুন সিগন্যাল দেওয়া হচ্ছে না।"
-        })
-    
-    symbol = request.args.get("symbol", "EUR/USD")
-    interval = request.args.get("interval", "1min")
-
-    seconds = {
-        "1min": 60,
-        "5min": 300,
-        "15min": 900
-    }
-
-    if interval not in seconds:
-        return jsonify({
-            "status": "error",
-            "message": "Use 1min, 5min or 15min"
-        }), 400
-
     try:
-        response = requests.get(
-            API_URL,
-            params={
-                "symbol": symbol,
-                "interval": interval,
-                "outputsize": 100,
-                "apikey": API_KEY,
-                "timezone": "UTC"
-            },
-            timeout=15
-        )
-
         data = response.json()
+    except ValueError:
+        raise ValueError("API returned an invalid response.")
 
-        if response.status_code != 200 or "values" not in data:
-            return jsonify({
-                "status": "error",
-                "message": data.get("message", "Data unavailable")
-            }), 502
+    if response.status_code != 200 or "values" not in data:
+        message = data.get("message", "Candle data unavailable")
+        raise ValueError(message)
 
-        now = datetime.now(timezone.utc)
-        duration = timedelta(seconds=seconds[interval])
+    # Twelve Data normally returns newest candle first.
+    candles = sorted(
+        data["values"],
+        key=lambda candle: candle["datetime"]
+    )
 
-        closed = []
+    return candles
 
-        for candle in data["values"]:
+
+# -------------------------
+# Closed candles only
+# -------------------------
+
+def get_closed_candles(candles, interval):
+    now = datetime.now(timezone.utc)
+    duration = timedelta(seconds=ALLOWED_INTERVALS[interval])
+    closed = []
+
+    for candle in candles:
+        try:
             start = datetime.strptime(
                 candle["datetime"],
                 "%Y-%m-%d %H:%M:%S"
@@ -238,55 +124,237 @@ def predict():
             if start + duration <= now:
                 closed.append(candle)
 
-        if len(closed) < 50:
-            return jsonify({
-                "status": "error",
-                "message": "Not enough closed candles"
-            }), 503
+        except (KeyError, ValueError):
+            continue
 
-        result = analyze_candles(closed)
-        
-        if result["signal"] in ("UP", "DOWN"):
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("""
-                    INSERT OR IGNORE INTO signals
-                    (symbol, interval, candle_time, signal,
-                     entry_price, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    symbol,
-                    interval,
-                    max(c["datetime"] for c in closed),
-                    result["signal"],
-                    result["last_close"],
-                                        datetime.now(timezone.utc).isoformat()
-                ))
+    return closed
+
+
+# -------------------------
+# EMA 20 analysis
+# -------------------------
+
+def analyze_candles(candles):
+    if len(candles) < 50:
+        raise ValueError("Not enough candles for analysis.")
+
+    closes = [float(candle["close"]) for candle in candles]
+
+    period = 20
+    multiplier = 2 / (period + 1)
+
+    ema = sum(closes[:period]) / period
+
+    for price in closes[period:]:
+        ema = (price * multiplier) + (ema * (1 - multiplier))
+
+    last_close = closes[-1]
+    previous_close = closes[-2]
+
+    # Basic rule-based signal, not a guaranteed prediction.
+    if last_close > ema and last_close > previous_close:
+        signal = "UP"
+        reason = "দাম EMA 20-এর ওপরে এবং শেষ ক্লোজ আগের ক্লোজের চেয়ে বেশি।"
+
+    elif last_close < ema and last_close < previous_close:
+        signal = "DOWN"
+        reason = "দাম EMA 20-এর নিচে এবং শেষ ক্লোজ আগের ক্লোজের চেয়ে কম।"
+
+    else:
+        signal = "WAIT"
+        reason = "মার্কেটের দিক স্পষ্ট নয়।"
+
+    return {
+        "signal": signal,
+        "ema20": round(ema, 6),
+        "last_close": last_close,
+        "reason": reason,
+    }
+
+
+# -------------------------
+# Save signal
+# -------------------------
+
+def save_signal(symbol, interval, candle_time, result):
+    if result["signal"] not in ("UP", "DOWN"):
+        return
+
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (symbol, interval, candle_time, signal, entry_price, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            symbol,
+            interval,
+            candle_time,
+            result["signal"],
+            result["last_close"],
+            datetime.now(timezone.utc).isoformat(),
+        ))
+
+
+# -------------------------
+# Evaluate pending signals
+# -------------------------
+
+def evaluate_pending_signals(symbol, interval, candles):
+    if not candles:
+        return
+
+    latest_time = candles[-1]["datetime"]
+    latest_close = float(candles[-1]["close"])
+
+    with sqlite3.connect(DB_NAME) as conn:
+        pending = conn.execute("""
+            SELECT id, candle_time, signal, entry_price
+            FROM signals
+            WHERE symbol = ?
+              AND interval = ?
+              AND result = 'PENDING'
+              AND candle_time < ?
+        """, (symbol, interval, latest_time)).fetchall()
+
+        for row in pending:
+            signal_id, candle_time, signal, entry_price = row
+
+            if signal == "UP":
+                outcome = (
+                    "WIN" if latest_close > entry_price else "LOSS"
+                )
+            else:
+                outcome = (
+                    "WIN" if latest_close < entry_price else "LOSS"
+                )
+
+            conn.execute("""
+                UPDATE signals
+                SET result = ?
+                WHERE id = ? AND result = 'PENDING'
+            """, (outcome, signal_id))
+
+
+# -------------------------
+# Health check
+# -------------------------
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
+# -------------------------
+# Candle endpoint
+# -------------------------
+
+@app.route("/candles")
+def candles_endpoint():
+    symbol = request.args.get("symbol", "EUR/USD").strip()
+    interval = request.args.get("interval", "1min").strip()
+
+    if interval not in ALLOWED_INTERVALS:
+        return jsonify({
+            "status": "error",
+            "message": "Use 1min, 5min or 15min",
+        }), 400
+
+    try:
+        candles = fetch_candles(symbol, interval, 20)
+
         return jsonify({
             "status": "ok",
             "symbol": symbol,
             "interval": interval,
-            "last_closed_candle": max(
-                c["datetime"] for c in closed
-            ),
-            "analysis": result,
-            "model": "rule_based_v1"
+            "candles": candles,
         })
 
-    except (requests.RequestException, ValueError, KeyError, TypeError):
+    except (ValueError, requests.RequestException) as error:
         return jsonify({
             "status": "error",
-            "message": "Prediction unavailable"
+            "message": str(error),
         }), 502
+
+
+# -------------------------
+# Prediction endpoint
+# -------------------------
+
+@app.route("/predict")
+def predict():
+    symbol = request.args.get("symbol", "EUR/USD").strip()
+    interval = request.args.get("interval", "1min").strip()
+
+    if interval not in ALLOWED_INTERVALS:
+        return jsonify({
+            "status": "error",
+            "message": "Use 1min, 5min or 15min",
+        }), 400
+
+    # Weekend filter for forex pairs.
+    if "/" in symbol and is_forex_market_closed():
+        return jsonify({
+            "status": "market_closed",
+            "symbol": symbol,
+            "interval": interval,
+            "signal": "MARKET CLOSED",
+            "message": "ফরেক্স মার্কেট বন্ধ। এখন নতুন সিগন্যাল দেওয়া হচ্ছে না।",
+        })
+
+    try:
+        all_candles = fetch_candles(symbol, interval, 100)
+        closed = get_closed_candles(all_candles, interval)
+
+        if len(closed) < 50:
+            return jsonify({
+                "status": "error",
+                "message": "বিশ্লেষণের জন্য পর্যাপ্ত বন্ধ ক্যান্ডেল পাওয়া যায়নি।",
+            }), 503
+
+        # Update outcomes for previously saved signals.
+        evaluate_pending_signals(symbol, interval, closed)
+
+        result = analyze_candles(closed)
+        last_candle_time = closed[-1]["datetime"]
+
+        # Save only one signal per candle.
+        save_signal(
+            symbol,
+            interval,
+            last_candle_time,
+            result
+        )
+
+        return jsonify({
+            "status": "ok",
+            "symbol": symbol,
+            "interval": interval,
+            "signal": result["signal"],
+            "analysis": result,
+            "last_closed_candle": last_candle_time,
+            "model": "rule_based_v1",
+            "message": (
+                "এটি সাধারণ নিয়মভিত্তিক বিশ্লেষণ; "
+                "সিগন্যাল নিশ্চিত নয়।"
+            ),
+        })
+
+    except (ValueError, requests.RequestException) as error:
+        return jsonify({
+            "status": "error",
+            "message": str(error),
+        }), 502
+
+
+# -------------------------
+# Statistics endpoint
+# -------------------------
 
 @app.route("/stats")
 def stats():
     with sqlite3.connect(DB_NAME) as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM signals"
-        ).fetchone()[0]
-
-        pending = conn.execute(
-            "SELECT COUNT(*) FROM signals WHERE result = 'PENDING'"
         ).fetchone()[0]
 
         wins = conn.execute(
@@ -297,17 +365,26 @@ def stats():
             "SELECT COUNT(*) FROM signals WHERE result = 'LOSS'"
         ).fetchone()[0]
 
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE result = 'PENDING'"
+        ).fetchone()[0]
+
     completed = wins + losses
-    win_rate = round(wins / completed * 100, 2) if completed else 0
+    win_rate = round((wins / completed) * 100, 2) if completed else 0
 
     return jsonify({
         "status": "ok",
         "total_signals": total,
-        "pending": pending,
         "wins": wins,
         "losses": losses,
-        "win_rate": win_rate
+        "pending": pending,
+        "win_rate": win_rate,
     })
 
+
+# -------------------------
+# Start server
+# -------------------------
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
