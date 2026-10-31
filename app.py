@@ -3,9 +3,12 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 
 app = Flask(__name__)
+@app.route("/")
+def home():
+    return render_template("index.html")
 
 API_KEY = os.getenv("TWELVE_DATA_API_KEY", "").strip()
 API_URL = "https://api.twelvedata.com/time_series"
