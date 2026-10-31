@@ -44,6 +44,24 @@ def health():
     return jsonify({"status": "ok"})
 
 
+def is_market_closed():
+    now = datetime.now(timezone.utc)
+    weekday = now.weekday()
+
+    # Saturday
+    if weekday == 5:
+        return True
+
+    # Sunday before 22:00 UTC
+    if weekday == 6 and now.hour < 22:
+        return True
+
+    # Friday from 22:00 UTC
+    if weekday == 4 and now.hour >= 22:
+        return True
+
+    return False
+
 @app.route("/candles")
 def candles():
     if not API_KEY:
@@ -161,6 +179,13 @@ def predict():
             "message": "API key missing"
         }), 500
 
+        if is_market_closed():
+        return jsonify({
+            "status": "market_closed",
+            "signal": "MARKET CLOSED",
+            "message": "ফরেক্স মার্কেট এখন বন্ধ। নতুন সিগন্যাল দেওয়া হচ্ছে না।"
+        })
+    
     symbol = request.args.get("symbol", "EUR/USD")
     interval = request.args.get("interval", "1min")
 
