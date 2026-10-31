@@ -7,6 +7,67 @@
 </head>
 <body>
     <h1>CandleRadar AI</h1>
-    <p>স্বাগতম! আমাদের নতুন ট্রেডিং অ্যানালাইসিস অ্যাপ।</p>
+
+    <h3>Forex Pair নির্বাচন করো</h3>
+
+    <input
+        type="text"
+        id="search"
+        placeholder="পেয়ার খুঁজুন..."
+        oninput="searchPairs()"
+    >
+
+    <select id="category" onchange="showPairs()">
+        <option value="All">সব পেয়ার</option>
+        <option value="Major">Major</option>
+        <option value="Minor">Minor</option>
+        <option value="Exotic">Exotic</option>
+    </select>
+
+    <div id="pairs"></div>
+
+    <script>
+        const forexPairs = [
+            {pair:"EUR/USD", category:"Major"},
+            {pair:"GBP/USD", category:"Major"},
+            {pair:"USD/JPY", category:"Major"},
+            {pair:"USD/CHF", category:"Major"},
+            {pair:"AUD/USD", category:"Major"},
+            {pair:"USD/CAD", category:"Major"},
+            {pair:"NZD/USD", category:"Major"},
+            {pair:"EUR/GBP", category:"Minor"},
+            {pair:"EUR/JPY", category:"Minor"},
+            {pair:"GBP/JPY", category:"Minor"},
+            {pair:"AUD/JPY", category:"Minor"},
+            {pair:"EUR/AUD", category:"Minor"},
+            {pair:"GBP/AUD", category:"Minor"},
+            {pair:"USD/BDT", category:"Exotic"},
+            {pair:"USD/SGD", category:"Exotic"},
+            {pair:"USD/TRY", category:"Exotic"}
+        ];
+
+        function showPairs() {
+            const category = document.getElementById("category").value;
+            const search = document.getElementById("search").value.toUpperCase();
+
+            const filtered = forexPairs.filter(item =>
+                (category === "All" || item.category === category) &&
+                item.pair.includes(search)
+            );
+
+            document.getElementById("pairs").innerHTML = filtered.map(item =>
+                `<label style="display:block;margin:10px">
+                    <input type="checkbox" value="${item.pair}">
+                    ${item.pair} (${item.category})
+                </label>`
+            ).join("");
+        }
+
+        function searchPairs() {
+            showPairs();
+        }
+
+        showPairs();
+    </script>
 </body>
 </html>
