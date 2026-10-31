@@ -220,11 +220,14 @@ def analyze_candles(candles):
         signal = "WAIT"
         reason = "মার্কেটের দিক স্পষ্ট নয়।"
 
+    patterns = detect_candle_patterns(candles)
+
     return {
         "signal": signal,
         "ema20": round(ema, 6),
         "last_close": last_close,
         "reason": reason,
+        "patterns": patterns,
     }
 
 
