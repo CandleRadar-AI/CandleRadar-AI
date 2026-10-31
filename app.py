@@ -234,3 +234,23 @@ def predict():
                     result["last_close"],
                                         datetime.now(timezone.utc).isoformat()
                 ))
+        return jsonify({
+            "status": "ok",
+            "symbol": symbol,
+            "interval": interval,
+            "last_closed_candle": max(
+                c["datetime"] for c in closed
+            ),
+            "analysis": result,
+            "model": "rule_based_v1"
+        })
+
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return jsonify({
+            "status": "error",
+            "message": "Prediction unavailable"
+        }), 502
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
