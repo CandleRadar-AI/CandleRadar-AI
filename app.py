@@ -667,6 +667,20 @@ def predict():
     try:
         all_candles = fetch_candles(symbol, interval, 100)
         closed = get_closed_candles(all_candles, interval)
+                freshness = check_data_freshness(closed, interval)
+
+        if not freshness["fresh"]:
+            return jsonify({
+                "status": "stale_data",
+                "symbol": symbol,
+                "interval": interval,
+                "signal": "WAIT",
+                "data_age_seconds": freshness["age_seconds"],
+                "last_closed_candle": (
+                    closed[-1]["datetime"] if closed else None
+                ),
+                "message": freshness["message"]
+            }), 200
 
         if len(closed) < 60:
             return jsonify({
