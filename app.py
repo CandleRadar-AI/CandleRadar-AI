@@ -15,6 +15,59 @@ SEARCH_API_URL = "https://api.twelvedata.com/symbol_search"
 DB_NAME = os.getenv("DB_NAME", "signals.db")
 
 ALLOWED_INTERVALS = {
+    # Maximum allowed data delay
+MAX_DATA_DELAY_SECONDS = {
+    "1min": 150,    # 2 minutes 30 seconds
+    "5min": 750,    # 12 minutes 30 seconds
+    "15min": 2250,  # 37 minutes 30 seconds
+}
+
+
+def check_data_freshness(candles, interval):
+    if not candles:
+        return {
+            "fresh": False,
+            "age_seconds": None,
+            "message": "কোনো ক্যান্ডেল পাওয়া যায়নি।"
+        }
+
+    try:
+        latest = datetime.strptime(
+            candles[-1]["datetime"],
+            "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
+
+        duration = timedelta(
+            seconds=ALLOWED_INTERVALS[interval]
+        )
+
+        candle_close_time = latest + duration
+        now = datetime.now(timezone.utc)
+
+        age_seconds = max(
+            0,
+            int((now - candle_close_time).total_seconds())
+        )
+
+        max_delay = MAX_DATA_DELAY_SECONDS[interval]
+
+        return {
+            "fresh": age_seconds <= max_delay,
+            "age_seconds": age_seconds,
+            "latest_candle": candles[-1]["datetime"],
+            "message": (
+                "ডেটা আপডেট আছে।"
+                if age_seconds <= max_delay
+                else "ডেটা পুরোনো। নতুন সিগন্যাল দেওয়া বন্ধ।"
+            )
+        }
+
+    except (KeyError, ValueError):
+        return {
+            "fresh": False,
+            "age_seconds": None,
+            "message": "ক্যান্ডেলের সময় যাচাই করা যায়নি।"
+        }
     "1min": 60,
     "5min": 300,
     "15min": 900,
