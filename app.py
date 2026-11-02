@@ -6,12 +6,12 @@ import requests
 from flask import Flask, jsonify, request, render_template
 
 app = Flask(__name__)
-@app.route("/")
-def home():
-    return render_template("index.html")
 
 API_KEY = os.getenv("TWELVE_DATA_API_KEY", "").strip()
+
 API_URL = "https://api.twelvedata.com/time_series"
+SEARCH_API_URL = "https://api.twelvedata.com/symbol_search"
+
 DB_NAME = os.getenv("DB_NAME", "signals.db")
 
 ALLOWED_INTERVALS = {
@@ -19,6 +19,15 @@ ALLOWED_INTERVALS = {
     "5min": 300,
     "15min": 900,
 }
+
+
+# -------------------------
+# Home
+# -------------------------
+
+@app.route("/")
+def home():
+    return render_template("index.html")
 
 
 # -------------------------
@@ -55,19 +64,98 @@ def is_forex_market_closed():
     Uses UTC and approximate 21:00 UTC closing/reopening time.
     This is not an exact holiday or broker-hours calendar.
     """
+
     now = datetime.now(timezone.utc)
-    weekday = now.weekday()  # Monday=0, Sunday=6
+    weekday = now.weekday()
 
-    if weekday == 5:  # Saturday
+    if weekday == 5:
         return True
 
-    if weekday == 4 and now.hour >= 21:  # Friday evening
+    if weekday == 4 and now.hour >= 21:
         return True
 
-    if weekday == 6 and now.hour < 21:  # Sunday before reopening
+    if weekday == 6 and now.hour < 21:
         return True
 
     return False
+
+
+# -------------------------
+# Smart Pair Search
+# -------------------------
+
+@app.route("/search-pair")
+def search_pair():
+    query = request.args.get("q", "").strip()
+
+    if not query:
+        return jsonify({
+            "status": "error",
+            "message": "পেয়ারের নাম লিখুন।"
+        }), 400
+
+    if not API_KEY:
+        return jsonify({
+            "status": "error",
+            "message": "Twelve Data API key missing."
+        }), 500
+
+    try:
+        response = requests.get(
+            SEARCH_API_URL,
+            params={
+                "symbol": query,
+                "apikey": API_KEY,
+            },
+            timeout=20,
+        )
+
+        data = response.json()
+
+        if response.status_code != 200 or "data" not in data:
+            return jsonify({
+                "status": "error",
+                "message": data.get(
+                    "message",
+                    "পেয়ার খুঁজে পাওয়া যায়নি।"
+                )
+            }), 404
+
+        results = []
+
+        for item in data["data"]:
+            symbol = item.get("symbol", "").strip()
+            instrument_type = item.get(
+                "instrument_type", ""
+            ).lower()
+
+            # শুধু Forex পেয়ার বিবেচনা
+            if instrument_type and instrument_type != "forex":
+                continue
+
+            if not symbol:
+                continue
+
+            results.append({
+                "symbol": symbol,
+                "name": item.get("instrument_name", ""),
+                "exchange": item.get("exchange", ""),
+                "type": instrument_type,
+            })
+
+        return jsonify({
+            "status": "ok",
+            "query": query,
+            "results": results,
+            "count": len(results),
+            "message": "পেয়ার সার্চ সম্পন্ন হয়েছে।"
+        })
+
+    except (ValueError, requests.RequestException) as error:
+        return jsonify({
+            "status": "error",
+            "message": str(error)
+        }), 502
 
 
 # -------------------------
@@ -75,6 +163,7 @@ def is_forex_market_closed():
 # -------------------------
 
 def fetch_candles(symbol, interval, outputsize=100):
+
     if not API_KEY:
         raise ValueError("Twelve Data API key is missing.")
 
@@ -96,10 +185,12 @@ def fetch_candles(symbol, interval, outputsize=100):
         raise ValueError("API returned an invalid response.")
 
     if response.status_code != 200 or "values" not in data:
-        message = data.get("message", "Candle data unavailable")
+        message = data.get(
+            "message",
+            "Candle data unavailable"
+        )
         raise ValueError(message)
 
-    # Twelve Data normally returns newest candle first.
     candles = sorted(
         data["values"],
         key=lambda candle: candle["datetime"]
@@ -113,8 +204,13 @@ def fetch_candles(symbol, interval, outputsize=100):
 # -------------------------
 
 def get_closed_candles(candles, interval):
+
     now = datetime.now(timezone.utc)
-    duration = timedelta(seconds=ALLOWED_INTERVALS[interval])
+
+    duration = timedelta(
+        seconds=ALLOWED_INTERVALS[interval]
+    )
+
     closed = []
 
     for candle in candles:
@@ -133,7 +229,12 @@ def get_closed_candles(candles, interval):
     return closed
 
 
+# -------------------------
+# Candle patterns
+# -------------------------
+
 def detect_candle_patterns(candles):
+
     if len(candles) < 3:
         return []
 
@@ -148,6 +249,7 @@ def detect_candle_patterns(candles):
         h = float(candle["high"])
         l = float(candle["low"])
         cl = float(candle["close"])
+
         return o, h, l, cl
 
     o, h, l, cl = values(c)
@@ -157,6 +259,7 @@ def detect_candle_patterns(candles):
     upper_wick = h - max(o, cl)
 
     # Single candle patterns
+
     if body > 0 and lower_wick >= body * 2 and upper_wick <= body:
         if cl > o:
             patterns.append("Hammer")
@@ -169,6 +272,7 @@ def detect_candle_patterns(candles):
         patterns.append("Doji")
 
     # Double candle patterns
+
     bo, bh, bl, bc = values(b)
 
     if bc < bo and cl > o and o <= bc and cl >= bo:
@@ -178,6 +282,7 @@ def detect_candle_patterns(candles):
         patterns.append("Bearish Engulfing")
 
     # Multiple candle patterns
+
     ao, ah, al, ac = values(a)
 
     if ac < ao and cl > o and cl > (ao + ac) / 2:
@@ -189,39 +294,66 @@ def detect_candle_patterns(candles):
             patterns.append("Evening Star")
 
     return patterns
+
+
 # -------------------------
-# EMA 20 analysis
+# Candle analysis
 # -------------------------
 
 def analyze_candles(candles):
-    if len(candles) < 60:
-        raise ValueError("বিশ্লেষণের জন্য কমপক্ষে ৬০টি ক্যান্ডেল প্রয়োজন।")
 
-    closes = [float(c["close"]) for c in candles]
-    highs = [float(c["high"]) for c in candles]
-    lows = [float(c["low"]) for c in candles]
+    if len(candles) < 60:
+        raise ValueError(
+            "বিশ্লেষণের জন্য কমপক্ষে ৬০টি ক্যান্ডেল প্রয়োজন।"
+        )
+
+    closes = [
+        float(c["close"]) for c in candles
+    ]
+
+    highs = [
+        float(c["high"]) for c in candles
+    ]
+
+    lows = [
+        float(c["low"]) for c in candles
+    ]
 
     def calculate_ema(data, period):
+
         multiplier = 2 / (period + 1)
+
         ema = sum(data[:period]) / period
 
         for price in data[period:]:
-            ema = price * multiplier + ema * (1 - multiplier)
+            ema = (
+                price * multiplier
+                + ema * (1 - multiplier)
+            )
 
         return ema
 
     # EMA 20 and EMA 50
+
     ema20 = calculate_ema(closes, 20)
     ema50 = calculate_ema(closes, 50)
 
     # RSI 14
+
     changes = [
         closes[i] - closes[i - 1]
         for i in range(1, len(closes))
     ]
 
-    gains = [max(change, 0) for change in changes[-14:]]
-    losses = [max(-change, 0) for change in changes[-14:]]
+    gains = [
+        max(change, 0)
+        for change in changes[-14:]
+    ]
+
+    losses = [
+        max(-change, 0)
+        for change in changes[-14:]
+    ]
 
     avg_gain = sum(gains) / 14
     avg_loss = sum(losses) / 14
@@ -233,6 +365,7 @@ def analyze_candles(candles):
         rsi = 100 - (100 / (1 + rs))
 
     # MACD 12, 26, 9
+
     multiplier12 = 2 / 13
     multiplier26 = 2 / 27
 
@@ -243,27 +376,40 @@ def analyze_candles(candles):
     ema26_values = []
 
     for price in closes[12:]:
-        ema12 = price * multiplier12 + ema12 * (1 - multiplier12)
+        ema12 = (
+            price * multiplier12
+            + ema12 * (1 - multiplier12)
+        )
         ema12_values.append(ema12)
 
     for price in closes[26:]:
-        ema26 = price * multiplier26 + ema26 * (1 - multiplier26)
+        ema26 = (
+            price * multiplier26
+            + ema26 * (1 - multiplier26)
+        )
         ema26_values.append(ema26)
 
     macd_values = [
         fast - slow
-        for fast, slow in zip(ema12_values[-len(ema26_values):], ema26_values)
+        for fast, slow in zip(
+            ema12_values[-len(ema26_values):],
+            ema26_values
+        )
     ]
 
     macd = macd_values[-1]
+
     signal_line = calculate_ema(macd_values, 9)
+
     macd_histogram = macd - signal_line
 
-    # Support and Resistance (last 20 candles)
+    # Support and Resistance
+
     support = min(lows[-20:])
     resistance = max(highs[-20:])
 
     last_close = closes[-1]
+
     patterns = detect_candle_patterns(candles)
 
     bullish_patterns = [
@@ -301,10 +447,14 @@ def analyze_candles(candles):
     elif macd_histogram < 0:
         bearish_score += 1
 
-    if any(p in patterns for p in bullish_patterns):
+    if any(
+        p in patterns for p in bullish_patterns
+    ):
         bullish_score += 1
 
-    if any(p in patterns for p in bearish_patterns):
+    if any(
+        p in patterns for p in bearish_patterns
+    ):
         bearish_score += 1
 
     if bullish_score >= 4 and bullish_score > bearish_score:
@@ -342,13 +492,21 @@ def analyze_candles(candles):
 # -------------------------
 
 def save_signal(symbol, interval, candle_time, result):
+
     if result["signal"] not in ("UP", "DOWN"):
         return
 
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute("""
             INSERT OR IGNORE INTO signals
-            (symbol, interval, candle_time, signal, entry_price, created_at)
+            (
+                symbol,
+                interval,
+                candle_time,
+                signal,
+                entry_price,
+                created_at
+            )
             VALUES (?, ?, ?, ?, ?, ?)
         """, (
             symbol,
@@ -365,6 +523,7 @@ def save_signal(symbol, interval, candle_time, result):
 # -------------------------
 
 def evaluate_pending_signals(symbol, interval, candles):
+
     if not candles:
         return
 
@@ -372,6 +531,7 @@ def evaluate_pending_signals(symbol, interval, candles):
     latest_close = float(candles[-1]["close"])
 
     with sqlite3.connect(DB_NAME) as conn:
+
         pending = conn.execute("""
             SELECT id, candle_time, signal, entry_price
             FROM signals
@@ -379,25 +539,37 @@ def evaluate_pending_signals(symbol, interval, candles):
               AND interval = ?
               AND result = 'PENDING'
               AND candle_time < ?
-        """, (symbol, interval, latest_time)).fetchall()
+        """, (
+            symbol,
+            interval,
+            latest_time
+        )).fetchall()
 
         for row in pending:
+
             signal_id, candle_time, signal, entry_price = row
 
             if signal == "UP":
                 outcome = (
-                    "WIN" if latest_close > entry_price else "LOSS"
+                    "WIN"
+                    if latest_close > entry_price
+                    else "LOSS"
                 )
             else:
                 outcome = (
-                    "WIN" if latest_close < entry_price else "LOSS"
+                    "WIN"
+                    if latest_close < entry_price
+                    else "LOSS"
                 )
 
             conn.execute("""
                 UPDATE signals
                 SET result = ?
                 WHERE id = ? AND result = 'PENDING'
-            """, (outcome, signal_id))
+            """, (
+                outcome,
+                signal_id
+            ))
 
 
 # -------------------------
@@ -406,7 +578,10 @@ def evaluate_pending_signals(symbol, interval, candles):
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+
+    return jsonify({
+        "status": "ok"
+    })
 
 
 # -------------------------
@@ -415,8 +590,16 @@ def health():
 
 @app.route("/candles")
 def candles_endpoint():
-    symbol = request.args.get("symbol", "EUR/USD").strip()
-    interval = request.args.get("interval", "1min").strip()
+
+    symbol = request.args.get(
+        "symbol",
+        "EUR/USD"
+    ).strip()
+
+    interval = request.args.get(
+        "interval",
+        "1min"
+    ).strip()
 
     if interval not in ALLOWED_INTERVALS:
         return jsonify({
@@ -425,7 +608,11 @@ def candles_endpoint():
         }), 400
 
     try:
-        candles = fetch_candles(symbol, interval, 20)
+        candles = fetch_candles(
+            symbol,
+            interval,
+            20
+        )
 
         return jsonify({
             "status": "ok",
@@ -435,6 +622,7 @@ def candles_endpoint():
         })
 
     except (ValueError, requests.RequestException) as error:
+
         return jsonify({
             "status": "error",
             "message": str(error),
@@ -447,8 +635,16 @@ def candles_endpoint():
 
 @app.route("/predict")
 def predict():
-    symbol = request.args.get("symbol", "EUR/USD").strip()
-    interval = request.args.get("interval", "1min").strip()
+
+    symbol = request.args.get(
+        "symbol",
+        "EUR/USD"
+    ).strip()
+
+    interval = request.args.get(
+        "interval",
+        "1min"
+    ).strip()
 
     if interval not in ALLOWED_INTERVALS:
         return jsonify({
@@ -456,33 +652,51 @@ def predict():
             "message": "Use 1min, 5min or 15min",
         }), 400
 
-    # Weekend filter for forex pairs.
+    # Weekend filter for forex pairs
+
     if "/" in symbol and is_forex_market_closed():
         return jsonify({
             "status": "market_closed",
             "symbol": symbol,
             "interval": interval,
             "signal": "MARKET CLOSED",
-            "message": "ফরেক্স মার্কেট বন্ধ। এখন নতুন সিগন্যাল দেওয়া হচ্ছে না।",
+            "message": (
+                "ফরেক্স মার্কেট বন্ধ। "
+                "এখন নতুন সিগন্যাল দেওয়া হচ্ছে না।"
+            ),
         })
 
     try:
-        all_candles = fetch_candles(symbol, interval, 100)
-        closed = get_closed_candles(all_candles, interval)
+        all_candles = fetch_candles(
+            symbol,
+            interval,
+            100
+        )
 
-        if len(closed) < 50:
+        closed = get_closed_candles(
+            all_candles,
+            interval
+        )
+
+        if len(closed) < 60:
             return jsonify({
                 "status": "error",
-                "message": "বিশ্লেষণের জন্য পর্যাপ্ত বন্ধ ক্যান্ডেল পাওয়া যায়নি।",
+                "message": (
+                    "বিশ্লেষণের জন্য পর্যাপ্ত "
+                    "বন্ধ ক্যান্ডেল পাওয়া যায়নি।"
+                ),
             }), 503
 
-        # Update outcomes for previously saved signals.
-        evaluate_pending_signals(symbol, interval, closed)
+        evaluate_pending_signals(
+            symbol,
+            interval,
+            closed
+        )
 
         result = analyze_candles(closed)
+
         last_candle_time = closed[-1]["datetime"]
 
-        # Save only one signal per candle.
         save_signal(
             symbol,
             interval,
@@ -505,6 +719,7 @@ def predict():
         })
 
     except (ValueError, requests.RequestException) as error:
+
         return jsonify({
             "status": "error",
             "message": str(error),
@@ -517,7 +732,9 @@ def predict():
 
 @app.route("/stats")
 def stats():
+
     with sqlite3.connect(DB_NAME) as conn:
+
         total = conn.execute(
             "SELECT COUNT(*) FROM signals"
         ).fetchone()[0]
@@ -535,7 +752,11 @@ def stats():
         ).fetchone()[0]
 
     completed = wins + losses
-    win_rate = round((wins / completed) * 100, 2) if completed else 0
+
+    win_rate = (
+        round((wins / completed) * 100, 2)
+        if completed else 0
+    )
 
     return jsonify({
         "status": "ok",
@@ -552,4 +773,8 @@ def stats():
 # -------------------------
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 5000))
+    )
