@@ -119,4 +119,426 @@
             background: #0f172a;
             padding: 12px;
             border-radius: 8px;
-            margin: 10px
+            margin: 10px 0;
+            color: #38bdf8;
+            font-weight: bold;
+            line-height: 1.8;
+        }
+
+        .countdown {
+            color: #facc15;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        hr {
+            border: 0;
+            border-top: 1px solid #334155;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🚀 CandleRadar AI</h1>
+    <p class="subtitle">Forex Market Analysis System</p>
+
+    <div class="box">
+
+        <h3>💱 Forex Pair নির্বাচন করো</h3>
+
+        <input
+            type="text"
+            id="search"
+            placeholder="পেয়ার খুঁজুন..."
+            oninput="showPairs()"
+        >
+
+        <select id="category" onchange="showPairs()">
+            <option value="All">সব পেয়ার</option>
+            <option value="Major">Major</option>
+            <option value="Minor">Minor</option>
+            <option value="Exotic">Exotic</option>
+        </select>
+
+        <div id="pairs"></div>
+
+        <h3>⏱️ Timeframe নির্বাচন</h3>
+
+        <select id="interval">
+            <option value="1min">1 Minute</option>
+            <option value="5min">5 Minutes</option>
+            <option value="15min">15 Minutes</option>
+        </select>
+
+        <button id="signalButton" onclick="getSignals()">
+            🔍 GET SIGNALS
+        </button>
+
+        <p class="note">
+            একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করতে পারবে।
+        </p>
+
+    </div>
+
+    <h2>📊 Signal Results</h2>
+
+    <div id="status"></div>
+    <div id="results"></div>
+
+<script>
+
+const forexPairs = [
+    {pair:"EUR/USD",category:"Major"},
+    {pair:"GBP/USD",category:"Major"},
+    {pair:"USD/JPY",category:"Major"},
+    {pair:"USD/CHF",category:"Major"},
+    {pair:"AUD/USD",category:"Major"},
+    {pair:"USD/CAD",category:"Major"},
+    {pair:"NZD/USD",category:"Major"},
+
+    {pair:"EUR/GBP",category:"Minor"},
+    {pair:"EUR/JPY",category:"Minor"},
+    {pair:"GBP/JPY",category:"Minor"},
+    {pair:"AUD/JPY",category:"Minor"},
+    {pair:"EUR/AUD",category:"Minor"},
+    {pair:"GBP/AUD",category:"Minor"},
+
+    {pair:"USD/SGD",category:"Exotic"},
+    {pair:"USD/TRY",category:"Exotic"}
+];
+
+
+// -------------------------
+// Show Forex Pairs
+// -------------------------
+
+function showPairs() {
+
+    const category =
+        document.getElementById("category").value;
+
+    const search =
+        document.getElementById("search").value.trim().toUpperCase();
+
+    const pairsBox =
+        document.getElementById("pairs");
+
+    const filtered = forexPairs.filter(item =>
+        (category === "All" || item.category === category) &&
+        item.pair.includes(search)
+    );
+
+    if (filtered.length === 0) {
+        pairsBox.innerHTML =
+            "<p style='color:#facc15'>কোনো পেয়ার পাওয়া যায়নি।</p>";
+        return;
+    }
+
+    pairsBox.innerHTML = filtered.map(item => `
+        <label class="pair">
+            <input type="checkbox" value="${item.pair}">
+            ${item.pair} (${item.category})
+        </label>
+    `).join("");
+}
+
+
+// -------------------------
+// Bangladesh Live Clock
+// -------------------------
+
+function updateLiveClock() {
+
+    const now = new Date();
+
+    const time = now.toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        hour12: true
+    });
+
+    const date = now.toLocaleDateString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        day: "2-digit",
+        month: "short",
+        year: "numeric"
+    });
+
+    document.querySelectorAll(".live-clock").forEach(el => {
+        el.textContent = date + " | " + time;
+    });
+}
+
+
+// -------------------------
+// Candle Countdown
+// -------------------------
+
+function updateCountdowns() {
+
+    document.querySelectorAll(".countdown").forEach(el => {
+
+        const seconds = Number(el.dataset.interval);
+
+        const now = Math.floor(Date.now() / 1000);
+
+        const remaining = seconds - (now % seconds);
+
+        const minutes = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+
+        el.textContent =
+            String(minutes).padStart(2, "0") + ":" +
+            String(secs).padStart(2, "0");
+    });
+}
+
+setInterval(updateLiveClock, 1000);
+setInterval(updateCountdowns, 1000);
+
+
+// -------------------------
+// Get Trading Signals
+// -------------------------
+
+async function getSignals() {
+
+    const selected = [
+        ...document.querySelectorAll('#pairs input:checked')
+    ].map(item => item.value);
+
+    const interval =
+        document.getElementById("interval").value;
+
+    const results =
+        document.getElementById("results");
+
+    const status =
+        document.getElementById("status");
+
+    const button =
+        document.getElementById("signalButton");
+
+    if (selected.length === 0) {
+        alert("অন্তত একটি পেয়ার নির্বাচন করো।");
+        return;
+    }
+
+    if (selected.length > 5) {
+        alert("একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করো।");
+        return;
+    }
+
+    results.innerHTML = "";
+    status.innerHTML = "⏳ বিশ্লেষণ চলছে...";
+
+    button.disabled = true;
+    button.innerText = "ANALYZING...";
+
+    try {
+
+        for (const symbol of selected) {
+
+            const card = document.createElement("div");
+            card.className = "signal";
+
+            card.innerHTML = `
+                <h3>${symbol}</h3>
+                <p>⏳ বিশ্লেষণ করা হচ্ছে...</p>
+            `;
+
+            results.appendChild(card);
+
+            try {
+
+                const response = await fetch(
+                    `/predict?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
+                );
+
+                const data = await response.json();
+
+                if (!response.ok || data.status === "error") {
+                    throw new Error(data.message || "ডেটা পাওয়া যায়নি");
+                }
+
+                if (data.status === "market_closed") {
+
+                    card.innerHTML = `
+                        <h3>💱 ${symbol}</h3>
+                        <h2 class="MARKET">MARKET CLOSED</h2>
+                        <p>${data.message}</p>
+                    `;
+
+                    continue;
+                }
+
+                const a = data.analysis || {};
+
+                const signal = data.signal || "WAIT";
+
+                const candleDate = data.last_closed_candle
+                    ? new Date(
+                        data.last_closed_candle.replace(" ", "T") + "Z"
+                    )
+                    : null;
+
+                const candleTime = candleDate &&
+                    !isNaN(candleDate.getTime())
+                    ? candleDate.toLocaleString("en-GB", {
+                        timeZone: "Asia/Dhaka",
+                        dateStyle: "medium",
+                        timeStyle: "medium"
+                    })
+                    : "N/A";
+
+                const countdownInterval =
+                    interval === "1min" ? 60 :
+                    interval === "5min" ? 300 : 900;
+
+                card.innerHTML = `
+                    <h3>💱 ${symbol}</h3>
+
+                    <h2 class="${signal}">${signal}</h2>
+
+                    <p>⏱️ Timeframe: ${interval}</p>
+
+                    <div class="live-time">
+                        🕒 Bangladesh Live Time:
+                        <span class="live-clock">Loading...</span>
+                    </div>
+
+                    <div class="indicator">
+                        🕯️ Signal Candle Time: ${candleTime}
+                    </div>
+
+                    <div class="indicator">
+                        ⏳ Next Candle Starts In:
+                        <span class="countdown"
+                            data-interval="${countdownInterval}">
+                            --:--
+                        </span>
+                    </div>
+
+                    <p>🧠 ${a.reason || "N/A"}</p>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        📊 Technical Indicators
+                    </h3>
+
+                    <div class="indicator">
+                        EMA 20: ${a.ema20 ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        EMA 50: ${a.ema50 ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        RSI 14: ${a.rsi ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        MACD: ${a.macd ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        MACD Signal: ${a.macd_signal ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        MACD Histogram: ${a.macd_histogram ?? "N/A"}
+                    </div>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        📍 Support & Resistance
+                    </h3>
+
+                    <div class="indicator">
+                        Support: ${a.support ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        Resistance: ${a.resistance ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        Last Close: ${a.last_close ?? "N/A"}
+                    </div>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        🎯 Analysis Score
+                    </h3>
+
+                    <div class="score">
+
+                        <div>
+                            <h3 class="UP">
+                                ${a.bullish_score ?? 0}
+                            </h3>
+                            <p>Bullish</p>
+                        </div>
+
+                        <div>
+                            <h3 class="DOWN">
+                                ${a.bearish_score ?? 0}
+                            </h3>
+                            <p>Bearish</p>
+                        </div>
+
+                    </div>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        🕯️ Candle Patterns
+                    </h3>
+
+                    <p>
+                        ${(a.patterns || []).join(", ") ||
+                        "কোনো Pattern পাওয়া যায়নি"}
+                    </p>
+
+                    <p class="note">
+                        ⚠️ এটি নিয়মভিত্তিক বিশ্লেষণ।
+                        কোনো সিগন্যাল নিশ্চিত নয়।
+                    </p>
+                `;
+
+                updateLiveClock();
+                updateCountdowns();
+
+            } catch (error) {
+
+                card.innerHTML = `
+                    <h3>💱 ${symbol}</h3>
+
+                    <p style="color:#ef4444">
+                        সমস্যা: ${error.message}
+                    </p>
+                `;
+            }
+        }
+
+        status.innerHTML = "✅ বিশ্লেষণ সম্পন্ন";
+
+    } finally {
+
+        button.disabled = false;
+        button.innerText = "🔍 GET SIGNALS";
+
+    }
+}
+
+showPairs();
+
+</script>
+
+</body>
+</html>
