@@ -73,10 +73,6 @@ def check_data_freshness(candles, interval):
             "age_seconds": None,
             "message": "ক্যান্ডেলের সময় যাচাই করা যায়নি।"
         }
-    "1min": 60,
-    "5min": 300,
-    "15min": 900,
-}
 
 
 # -------------------------
