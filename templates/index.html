@@ -6,11 +6,26 @@
     <title>CandleRadar AI</title>
 
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             background: #101827;
             color: white;
             font-family: Arial, sans-serif;
             padding: 15px;
+            margin: 0;
+        }
+
+        h1 {
+            color: #22c55e;
+            text-align: center;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #94a3b8;
         }
 
         .box {
@@ -34,6 +49,11 @@
             color: white;
             font-weight: bold;
             font-size: 16px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #64748b;
         }
 
         .pair {
@@ -42,26 +62,86 @@
             border-bottom: 1px solid #334155;
         }
 
+        .pair input {
+            width: auto;
+        }
+
         .signal {
             background: #1e293b;
             padding: 15px;
             border-radius: 10px;
-            margin: 10px 0;
+            margin: 12px 0;
+            border: 1px solid #334155;
         }
 
-        .UP { color: #22c55e; }
-        .DOWN { color: #ef4444; }
-        .WAIT { color: #facc15; }
+        .signal h3 {
+            color: #38bdf8;
+        }
+
+        .UP {
+            color: #22c55e;
+        }
+
+        .DOWN {
+            color: #ef4444;
+        }
+
+        .WAIT {
+            color: #facc15;
+        }
+
+        .MARKET {
+            color: #f97316;
+        }
+
+        .indicator {
+            background: #101827;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 7px 0;
+        }
+
+        .section-title {
+            color: #38bdf8;
+            margin-top: 18px;
+        }
+
+        .score {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .score div {
+            background: #101827;
+            padding: 12px;
+            border-radius: 8px;
+            width: 50%;
+            text-align: center;
+        }
+
+        .note {
+            color: #facc15;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        hr {
+            border: 0;
+            border-top: 1px solid #334155;
+            margin: 15px 0;
+        }
     </style>
 </head>
 
 <body>
 
     <h1>🚀 CandleRadar AI</h1>
-    <p>Forex Market Analysis System</p>
+    <p class="subtitle">Forex Market Analysis System</p>
 
     <div class="box">
-        <h3>Forex Pair নির্বাচন করো</h3>
+
+        <h3>💱 Forex Pair নির্বাচন করো</h3>
 
         <input
             type="text"
@@ -79,7 +159,7 @@
 
         <div id="pairs"></div>
 
-        <h3>Timeframe নির্বাচন</h3>
+        <h3>⏱️ Timeframe নির্বাচন</h3>
 
         <select id="interval">
             <option value="1min">1 Minute</option>
@@ -87,9 +167,14 @@
             <option value="15min">15 Minutes</option>
         </select>
 
-        <button onclick="getSignals()">
+        <button id="signalButton" onclick="getSignals()">
             🔍 GET SIGNALS
         </button>
+
+        <p class="note">
+            একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করতে পারবে।
+        </p>
+
     </div>
 
     <h2>📊 Signal Results</h2>
@@ -119,6 +204,11 @@ const forexPairs = [
     {pair:"USD/TRY",category:"Exotic"}
 ];
 
+
+// -------------------------
+// Show Forex Pairs
+// -------------------------
+
 function showPairs() {
 
     const category =
@@ -141,6 +231,11 @@ function showPairs() {
         `).join("");
 }
 
+
+// -------------------------
+// Get Trading Signals
+// -------------------------
+
 async function getSignals() {
 
     const selected = [
@@ -158,6 +253,9 @@ async function getSignals() {
     const status =
         document.getElementById("status");
 
+    const button =
+        document.getElementById("signalButton");
+
     if (selected.length === 0) {
         alert("অন্তত একটি পেয়ার নির্বাচন করো।");
         return;
@@ -171,54 +269,167 @@ async function getSignals() {
     results.innerHTML = "";
     status.innerHTML = "⏳ বিশ্লেষণ চলছে...";
 
-    for (const symbol of selected) {
+    button.disabled = true;
+    button.innerText = "ANALYZING...";
 
-        const card = document.createElement("div");
-        card.className = "signal";
+    try {
 
-        card.innerHTML = `
-            <h3>${symbol}</h3>
-            <p>বিশ্লেষণ করা হচ্ছে...</p>
-        `;
+        for (const symbol of selected) {
 
-        results.appendChild(card);
+            const card = document.createElement("div");
+            card.className = "signal";
 
-        try {
+            card.innerHTML = `
+                <h3>${symbol}</h3>
+                <p>⏳ বিশ্লেষণ করা হচ্ছে...</p>
+            `;
 
-            const response = await fetch(
-                `/predict?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
-            );
+            results.appendChild(card);
 
-            const data = await response.json();
+            try {
 
-            if (!response.ok || data.status === "error") {
-                throw new Error(data.message || "ডেটা পাওয়া যায়নি");
+                const response = await fetch(
+                    `/predict?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
+                );
+
+                const data = await response.json();
+
+                if (!response.ok || data.status === "error") {
+                    throw new Error(data.message || "ডেটা পাওয়া যায়নি");
+                }
+
+                if (data.status === "market_closed") {
+
+                    card.innerHTML = `
+                        <h3>💱 ${symbol}</h3>
+                        <h2 class="MARKET">MARKET CLOSED</h2>
+                        <p>${data.message}</p>
+                    `;
+
+                    continue;
+                }
+
+                const a = data.analysis || {};
+                const signal = data.signal || "WAIT";
+
+                card.innerHTML = `
+                    <h3>💱 ${symbol}</h3>
+
+                    <h2 class="${signal}">${signal}</h2>
+
+                    <p>⏱️ Timeframe: ${interval}</p>
+
+                    <p>🧠 ${a.reason || "N/A"}</p>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        📊 Technical Indicators
+                    </h3>
+
+                    <div class="indicator">
+                        EMA 20: ${a.ema20 ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        EMA 50: ${a.ema50 ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        RSI 14: ${a.rsi ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        MACD: ${a.macd ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        MACD Signal: ${a.macd_signal ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        MACD Histogram: ${a.macd_histogram ?? "N/A"}
+                    </div>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        📍 Support & Resistance
+                    </h3>
+
+                    <div class="indicator">
+                        Support: ${a.support ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        Resistance: ${a.resistance ?? "N/A"}
+                    </div>
+
+                    <div class="indicator">
+                        Last Close: ${a.last_close ?? "N/A"}
+                    </div>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        🎯 Analysis Score
+                    </h3>
+
+                    <div class="score">
+
+                        <div>
+                            <h3 class="UP">
+                                ${a.bullish_score ?? 0}
+                            </h3>
+                            <p>Bullish</p>
+                        </div>
+
+                        <div>
+                            <h3 class="DOWN">
+                                ${a.bearish_score ?? 0}
+                            </h3>
+                            <p>Bearish</p>
+                        </div>
+
+                    </div>
+
+                    <hr>
+
+                    <h3 class="section-title">
+                        🕯️ Candle Patterns
+                    </h3>
+
+                    <p>
+                        ${(a.patterns || []).join(", ") ||
+                        "কোনো Pattern পাওয়া যায়নি"}
+                    </p>
+
+                    <p class="note">
+                        ⚠️ এটি নিয়মভিত্তিক বিশ্লেষণ।
+                        কোনো সিগন্যাল নিশ্চিত নয়।
+                    </p>
+                `;
+
+            } catch (error) {
+
+                card.innerHTML = `
+                    <h3>💱 ${symbol}</h3>
+
+                    <p style="color:#ef4444">
+                        সমস্যা: ${error.message}
+                    </p>
+                `;
             }
-
-            const signal = data.signal || "WAIT";
-
-            card.innerHTML = `
-                <h3>${symbol}</h3>
-                <h2 class="${signal}">${signal}</h2>
-                <p>Timeframe: ${interval}</p>
-                <p>${data.analysis?.reason || data.message || ""}</p>
-                <p>EMA 20: ${data.analysis?.ema20 ?? "N/A"}</p>
-                <p>Last Close: ${data.analysis?.last_close ?? "N/A"}</p>
-                <p>Patterns: ${(data.analysis?.patterns || []).join(", ") || "None"}</p>
-            `;
-
-        } catch (error) {
-
-            card.innerHTML = `
-                <h3>${symbol}</h3>
-                <p style="color:#ef4444">
-                    সমস্যা: ${error.message}
-                </p>
-            `;
         }
-    }
 
-    status.innerHTML = "✅ বিশ্লেষণ সম্পন্ন";
+        status.innerHTML = "✅ বিশ্লেষণ সম্পন্ন";
+
+    } finally {
+
+        button.disabled = false;
+        button.innerText = "🔍 GET SIGNALS";
+
+    }
 }
 
 showPairs();
