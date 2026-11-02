@@ -123,12 +123,20 @@ def search_pair():
 
         results = []
 
-        for item in data["data"]:
+        for item in data.get("data", []):
     symbol = item.get("symbol", "").strip()
     instrument_type = item.get(
         "instrument_type",
         item.get("type", "")
     )
+
+    if not symbol or "/" not in symbol:
+        continue
+
+    results.append({
+        "symbol": symbol,
+        "instrument_type": instrument_type
+    })
 
     if not symbol or "/" not in symbol:
         continue
