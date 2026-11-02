@@ -235,7 +235,48 @@ function showPairs() {
 // -------------------------
 // Get Trading Signals
 // -------------------------
+// Bangladesh Live Clock
+function updateLiveClock() {
+    const now = new Date();
 
+    const time = now.toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        hour12: true
+    });
+
+    const date = now.toLocaleDateString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        day: "2-digit",
+        month: "short",
+        year: "numeric"
+    });
+
+    document.querySelectorAll(".live-clock").forEach(el => {
+        el.textContent = date + " | " + time;
+    });
+}
+
+
+// Candle Countdown
+function updateCountdowns() {
+    document.querySelectorAll(".countdown").forEach(el => {
+        const seconds = Number(el.dataset.interval);
+        const now = Math.floor(Date.now() / 1000);
+        const remaining = seconds - (now % seconds);
+
+        const minutes = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+
+        el.textContent =
+            String(minutes).padStart(2, "0") + ":" +
+            String(secs).padStart(2, "0");
+    });
+}
+
+
+setInterval(updateLiveClock, 1000);
+setInterval(updateCountdowns, 1000);
+    
 async function getSignals() {
 
     const selected = [
@@ -310,6 +351,17 @@ async function getSignals() {
                 }
 
                 const a = data.analysis || {};
+                const candleDate = data.last_closed_candle
+    ? new Date(data.last_closed_candle.replace(" ", "T") + "Z")
+    : null;
+
+const candleTime = candleDate
+    ? candleDate.toLocaleString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        dateStyle: "medium",
+        timeStyle: "medium"
+    })
+    : "N/A";
                 const signal = data.signal || "WAIT";
 
                 card.innerHTML = `
@@ -318,6 +370,22 @@ async function getSignals() {
                     <h2 class="${signal}">${signal}</h2>
 
                     <p>⏱️ Timeframe: ${interval}</p>
+                    <div class="live-time">
+    🕒 Bangladesh Live Time:
+    <span class="live-clock">Loading...</span>
+</div>
+
+<div class="indicator">
+    🕯️ Signal Candle Time: ${candleTime}
+</div>
+
+<div class="indicator">
+    ⏳ Next Candle Starts In:
+    <span class="countdown"
+          data-interval="${interval === "1min" ? 60 : interval === "5min" ? 300 : 900}">
+        --:--
+    </span>
+</div>
 
                     <p>🧠 ${a.reason || "N/A"}</p>
 
@@ -434,6 +502,21 @@ async function getSignals() {
 
 showPairs();
 
+.live-time {
+    background: #0f172a;
+    padding: 12px;
+    border-radius: 8px;
+    margin: 10px 0;
+    color: #38bdf8;
+    font-weight: bold;
+    line-height: 1.8;
+}
+
+.countdown {
+    color: #facc15;
+    font-size: 20px;
+    font-weight: bold;
+}
 </script>
 
 </body>
