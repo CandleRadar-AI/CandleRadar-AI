@@ -124,14 +124,14 @@ def search_pair():
         results = []
 
         for item in data["data"]:
-            symbol = item.get("symbol", "").strip()
-            instrument_type = item.get(
-                "instrument_type", ""
-            ).lower()
+    symbol = item.get("symbol", "").strip()
+    instrument_type = item.get(
+        "instrument_type",
+        item.get("type", "")
+    )
 
-            # শুধু Forex পেয়ার বিবেচনা
-            if instrument_type and instrument_type != "forex":
-                continue
+    if not symbol or "/" not in symbol:
+        continue
 
             if not symbol:
                 continue
