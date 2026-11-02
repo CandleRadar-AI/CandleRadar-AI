@@ -124,24 +124,14 @@ def search_pair():
         results = []
 
         for item in data.get("data", []):
-    symbol = item.get("symbol", "").strip()
-    instrument_type = item.get(
-        "instrument_type",
-        item.get("type", "")
-    )
+            symbol = item.get("symbol", "").strip()
 
-    if not symbol or "/" not in symbol:
-        continue
+            instrument_type = item.get(
+                "instrument_type",
+                item.get("type", "")
+            )
 
-    results.append({
-        "symbol": symbol,
-        "instrument_type": instrument_type
-    })
-
-    if not symbol or "/" not in symbol:
-        continue
-
-            if not symbol:
+            if not symbol or "/" not in symbol:
                 continue
 
             results.append({
@@ -315,22 +305,15 @@ def analyze_candles(candles):
             "বিশ্লেষণের জন্য কমপক্ষে ৬০টি ক্যান্ডেল প্রয়োজন।"
         )
 
-    closes = [
-        float(c["close"]) for c in candles
-    ]
-
-    highs = [
-        float(c["high"]) for c in candles
-    ]
-
-    lows = [
-        float(c["low"]) for c in candles
-    ]
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c["high"]) for c in candles]
+    lows = [float(c["low"]) for c in candles]
 
     def calculate_ema(data, period):
+        if len(data) < period:
+            raise ValueError("EMA calculation needs more candles.")
 
         multiplier = 2 / (period + 1)
-
         ema = sum(data[:period]) / period
 
         for price in data[period:]:
@@ -353,15 +336,8 @@ def analyze_candles(candles):
         for i in range(1, len(closes))
     ]
 
-    gains = [
-        max(change, 0)
-        for change in changes[-14:]
-    ]
-
-    losses = [
-        max(-change, 0)
-        for change in changes[-14:]
-    ]
+    gains = [max(change, 0) for change in changes[-14:]]
+    losses = [max(-change, 0) for change in changes[-14:]]
 
     avg_gain = sum(gains) / 14
     avg_loss = sum(losses) / 14
@@ -406,16 +382,13 @@ def analyze_candles(candles):
     ]
 
     macd = macd_values[-1]
-
     signal_line = calculate_ema(macd_values, 9)
-
     macd_histogram = macd - signal_line
 
     # Support and Resistance
 
     support = min(lows[-20:])
     resistance = max(highs[-20:])
-
     last_close = closes[-1]
 
     patterns = detect_candle_patterns(candles)
@@ -455,14 +428,10 @@ def analyze_candles(candles):
     elif macd_histogram < 0:
         bearish_score += 1
 
-    if any(
-        p in patterns for p in bullish_patterns
-    ):
+    if any(p in patterns for p in bullish_patterns):
         bullish_score += 1
 
-    if any(
-        p in patterns for p in bearish_patterns
-    ):
+    if any(p in patterns for p in bearish_patterns):
         bearish_score += 1
 
     if bullish_score >= 4 and bullish_score > bearish_score:
@@ -539,7 +508,6 @@ def evaluate_pending_signals(symbol, interval, candles):
     latest_close = float(candles[-1]["close"])
 
     with sqlite3.connect(DB_NAME) as conn:
-
         pending = conn.execute("""
             SELECT id, candle_time, signal, entry_price
             FROM signals
@@ -554,21 +522,12 @@ def evaluate_pending_signals(symbol, interval, candles):
         )).fetchall()
 
         for row in pending:
-
             signal_id, candle_time, signal, entry_price = row
 
             if signal == "UP":
-                outcome = (
-                    "WIN"
-                    if latest_close > entry_price
-                    else "LOSS"
-                )
+                outcome = "WIN" if latest_close > entry_price else "LOSS"
             else:
-                outcome = (
-                    "WIN"
-                    if latest_close < entry_price
-                    else "LOSS"
-                )
+                outcome = "WIN" if latest_close < entry_price else "LOSS"
 
             conn.execute("""
                 UPDATE signals
@@ -586,10 +545,7 @@ def evaluate_pending_signals(symbol, interval, candles):
 
 @app.route("/health")
 def health():
-
-    return jsonify({
-        "status": "ok"
-    })
+    return jsonify({"status": "ok"})
 
 
 # -------------------------
@@ -599,15 +555,8 @@ def health():
 @app.route("/candles")
 def candles_endpoint():
 
-    symbol = request.args.get(
-        "symbol",
-        "EUR/USD"
-    ).strip()
-
-    interval = request.args.get(
-        "interval",
-        "1min"
-    ).strip()
+    symbol = request.args.get("symbol", "EUR/USD").strip()
+    interval = request.args.get("interval", "1min").strip()
 
     if interval not in ALLOWED_INTERVALS:
         return jsonify({
@@ -616,11 +565,7 @@ def candles_endpoint():
         }), 400
 
     try:
-        candles = fetch_candles(
-            symbol,
-            interval,
-            20
-        )
+        candles = fetch_candles(symbol, interval, 20)
 
         return jsonify({
             "status": "ok",
@@ -630,7 +575,6 @@ def candles_endpoint():
         })
 
     except (ValueError, requests.RequestException) as error:
-
         return jsonify({
             "status": "error",
             "message": str(error),
@@ -644,15 +588,8 @@ def candles_endpoint():
 @app.route("/predict")
 def predict():
 
-    symbol = request.args.get(
-        "symbol",
-        "EUR/USD"
-    ).strip()
-
-    interval = request.args.get(
-        "interval",
-        "1min"
-    ).strip()
+    symbol = request.args.get("symbol", "EUR/USD").strip()
+    interval = request.args.get("interval", "1min").strip()
 
     if interval not in ALLOWED_INTERVALS:
         return jsonify({
@@ -675,16 +612,8 @@ def predict():
         })
 
     try:
-        all_candles = fetch_candles(
-            symbol,
-            interval,
-            100
-        )
-
-        closed = get_closed_candles(
-            all_candles,
-            interval
-        )
+        all_candles = fetch_candles(symbol, interval, 100)
+        closed = get_closed_candles(all_candles, interval)
 
         if len(closed) < 60:
             return jsonify({
@@ -695,14 +624,8 @@ def predict():
                 ),
             }), 503
 
-        evaluate_pending_signals(
-            symbol,
-            interval,
-            closed
-        )
-
+        evaluate_pending_signals(symbol, interval, closed)
         result = analyze_candles(closed)
-
         last_candle_time = closed[-1]["datetime"]
 
         save_signal(
@@ -727,7 +650,6 @@ def predict():
         })
 
     except (ValueError, requests.RequestException) as error:
-
         return jsonify({
             "status": "error",
             "message": str(error),
@@ -742,7 +664,6 @@ def predict():
 def stats():
 
     with sqlite3.connect(DB_NAME) as conn:
-
         total = conn.execute(
             "SELECT COUNT(*) FROM signals"
         ).fetchone()[0]
@@ -781,8 +702,7 @@ def stats():
 # -------------------------
 
 if __name__ == "__main__":
-
     app.run(
         host="0.0.0.0",
         port=int(os.getenv("PORT", 5000))
-    )
+            )
