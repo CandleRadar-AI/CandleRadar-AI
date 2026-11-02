@@ -15,11 +15,16 @@ SEARCH_API_URL = "https://api.twelvedata.com/symbol_search"
 DB_NAME = os.getenv("DB_NAME", "signals.db")
 
 ALLOWED_INTERVALS = {
-    # Maximum allowed data delay
+    "1min": 60,
+    "5min": 300,
+    "15min": 900,
+}
+
+# Maximum allowed data delay
 MAX_DATA_DELAY_SECONDS = {
-    "1min": 150,    # 2 minutes 30 seconds
-    "5min": 750,    # 12 minutes 30 seconds
-    "15min": 2250,  # 37 minutes 30 seconds
+    "1min": 150,
+    "5min": 750,
+    "15min": 2250,
 }
 
 
