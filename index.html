@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CandleRadar AI</title>
+<style>
+*{box-sizing:border-box}
+body{background:#101827;color:white;font-family:Arial,sans-serif;padding:15px;margin:0}
+h1{color:#22c55e;text-align:center}.subtitle{text-align:center;color:#94a3b8}
+.box{background:#1e293b;padding:15px;border-radius:12px;margin-bottom:15px}
+input,select,button{padding:12px;margin:6px 0;border-radius:7px;border:1px solid #475569;width:100%;background:#0f172a;color:white}
+button{background:#16a34a;color:white;font-weight:bold;font-size:16px;cursor:pointer;border:0}
+button:disabled{background:#64748b}
+.secondary{background:#334155}.pair{display:flex;align-items:center;gap:9px;padding:10px;border-bottom:1px solid #334155;margin:0}
+.pair input{width:auto;margin:0}.pair small{color:#94a3b8}
+#pairs{max-height:300px;overflow:auto;background:#101827;border-radius:8px;margin-top:10px}
+.signal{background:#1e293b;padding:15px;border-radius:10px;margin:12px 0;border:1px solid #334155;overflow-wrap:anywhere}
+.signal h3{color:#38bdf8}.UP{color:#22c55e}.DOWN{color:#ef4444}.WAIT{color:#facc15}.MARKET{color:#f97316}
+.indicator{background:#101827;padding:10px;border-radius:8px;margin:7px 0;overflow-wrap:anywhere}
+.section-title{color:#38bdf8;margin-top:18px}.score{display:flex;justify-content:space-between;gap:10px}
+.score div{background:#101827;padding:12px;border-radius:8px;width:50%;text-align:center}
+.note{color:#facc15;font-size:13px;line-height:1.6}
+.live-time{background:#0f172a;padding:12px;border-radius:8px;margin:10px 0;color:#38bdf8;font-weight:bold;line-height:1.8}
+.countdown{color:#facc15;font-size:20px;font-weight:bold}
+hr{border:0;border-top:1px solid #334155;margin:15px 0}
+#searchMessage{font-size:13px;color:#facc15;line-height:1.5}
+.badge{font-size:11px;color:#86efac;border:1px solid #166534;border-radius:12px;padding:3px 7px}
+</style>
+</head>
+<body>
+<h1>🚀 CandleRadar AI</h1>
+<p class="subtitle">REAL-MARKET CURRENCY PAIRS · OTC বাদ</p>
+
+<div class="box">
+<h3>💱 Currency Pair নির্বাচন</h3>
+<p class="note">শুধু Currency Pair খোঁজা হবে। OTC বাদ। তবে Twelve Data-তে পেয়ার পাওয়া মানেই সেটি Quotex-এ আছে—এমন নয়; Quotex-এ আলাদাভাবে মিলিয়ে নেবে।</p>
+
+<label for="search">পেয়ার সার্চ</label>
+<input type="text" id="search" placeholder="যেমন EUR/USD বা GBP/USD">
+<button id="searchButton" onclick="searchPairs()">🔎 সার্চ করো</button>
+<div id="searchMessage" aria-live="polite"></div>
+
+<h4>⭐ সাধারণ Currency Pair</h4>
+<div id="pairs"></div>
+
+<h3>⏱️ Timeframe নির্বাচন</h3>
+<select id="interval">
+<option value="1min">1 Minute</option>
+<option value="5min">5 Minutes</option>
+<option value="15min">15 Minutes</option>
+</select>
+<button id="signalButton" onclick="getSignals()">🔍 GET SIGNALS</button>
+<p class="note">একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করতে পারবে। সার্চের ফলাফল Twelve Data-এর; Quotex availability নিজে যাচাই করবে।</p>
+</div>
+
+<h2>📊 Signal Results</h2>
+<div id="status"></div>
+<div id="results"></div>
+
+<script>
+const defaultPairs = [
+["EUR/USD","Major"],["GBP/USD","Major"],["USD/JPY","Major"],
+["USD/CHF","Major"],["AUD/USD","Major"],["USD/CAD","Major"],
+["NZD/USD","Major"],["EUR/GBP","Minor"],["EUR/JPY","Minor"],
+["GBP/JPY","Minor"],["AUD/JPY","Minor"],["EUR/AUD","Minor"],
+["GBP/AUD","Minor"],["USD/SGD","Exotic"],["USD/TRY","Exotic"]
+];
+
+let availablePairs = defaultPairs.map(([symbol, category]) => ({
+ symbol, name:"", exchange:"", type:"Currency", source:"Suggested list"
+}));
+const selectedPairs = new Set();
+
+function escapeHTML(value) {
+ return String(value ?? "").replace(/[&<>"']/g, c => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+function renderPairs() {
+ const box = document.getElementById("pairs");
+ if (!availablePairs.length) {
+  box.innerHTML = "<p style='padding:10px;color:#facc15'>কোনো Currency Pair নেই।</p>";
+  return;
+ }
+ box.innerHTML = availablePairs.map(item => {
+  const symbol = escapeHTML(item.symbol);
+  const checked = selectedPairs.has(item.symbol) ? "checked" : "";
+  const detail = item.exchange ? ` · ${escapeHTML(item.exchange)}` : "";
+  return `<label class="pair">
+   <input type="checkbox" value="${symbol}" ${checked}
+    onchange="togglePair(this)">
+   <span><strong>${symbol}</strong> <small>${escapeHTML(item.category || item.type || "Currency")}${detail}</small></span>
+   <span class="badge">OTC বাদ</span>
+  </label>`;
+ }).join("");
+}
+
+function togglePair(input) {
+ if (input.checked) {
+  if (selectedPairs.size >= 5) {
+   input.checked = false;
+   alert("একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করতে পারবে।");
+   return;
+  }
+  selectedPairs.add(input.value);
+ } else selectedPairs.delete(input.value);
+}
+
+async function searchPairs() {
+ const query = document.getElementById("search").value.trim();
+ const msg = document.getElementById("searchMessage");
+ const button = document.getElementById("searchButton");
+ if (!query) { msg.textContent = "পেয়ারের নাম লিখুন।"; return; }
+
+ button.disabled = true;
+ button.textContent = "খোঁজা হচ্ছে...";
+ msg.textContent = "Twelve Data-তে Currency Pair খোঁজা হচ্ছে...";
+ try {
+  const response = await fetch(`/search-pair?q=${encodeURIComponent(query)}`);
+  const data = await response.json();
+  if (!response.ok || data.status !== "ok") {
+   throw new Error(data.message || "সার্চ করা যায়নি।");
+  }
+
+  // Only accept search results explicitly described as currency/forex.
+  const currencyResults = (data.results || []).filter(item => {
+   const type = String(item.type || "").toLowerCase();
+   return item.symbol && item.symbol.includes("/") &&
+    (type.includes("currency") || type.includes("forex"));
+  });
+
+  if (!currencyResults.length) {
+   msg.textContent = "কোনো নিশ্চিত Currency Pair ফলাফল পাওয়া যায়নি।";
+   availablePairs = [];
+  } else {
+   availablePairs = currencyResults.map(item => ({
+    symbol:item.symbol,
+    name:item.name || "",
+    exchange:item.exchange || "",
+    type:item.type || "Currency",
+    category:"Search result"
+   }));
+   msg.textContent = `${currencyResults.length}টি Currency Pair পাওয়া গেছে। এগুলো Quotex-এ আছে কি না, Quotex অ্যাপে মিলিয়ে নাও।`;
+  }
+  renderPairs();
+ } catch(error) {
+  msg.textContent = "সার্চ সমস্যা: " + error.message;
+ } finally {
+  button.disabled = false;
+  button.textContent = "🔎 সার্চ করো";
+ }
+}
+
+function updateLiveClock() {
+ const now = new Date();
+ const time = now.toLocaleTimeString("en-GB",{timeZone:"Asia/Dhaka",hour12:true});
+ const date = now.toLocaleDateString("en-GB",{timeZone:"Asia/Dhaka",day:"2-digit",month:"short",year:"numeric"});
+ document.querySelectorAll(".live-clock").forEach(el => el.textContent = date+" | "+time);
+}
+
+function updateCountdowns() {
+ document.querySelectorAll(".countdown").forEach(el => {
+  const seconds = Number(el.dataset.interval);
+  const now = Math.floor(Date.now()/1000);
+  const remaining = seconds-(now%seconds);
+  el.textContent = String(Math.floor(remaining/60)).padStart(2,"0")+":"+
+   String(remaining%60).padStart(2,"0");
+ });
+}
+setInterval(updateLiveClock,1000);
+setInterval(updateCountdowns,1000);
+
+async function getSignals() {
+ const selected = [...selectedPairs];
+ const interval = document.getElementById("interval").value;
+ const results = document.getElementById("results");
+ const status = document.getElementById("status");
+ const button = document.getElementById("signalButton");
+
+ if (!selected.length) { alert("অন্তত একটি পেয়ার নির্বাচন করো।"); return; }
+ if (selected.length>5) { alert("একবারে সর্বোচ্চ ৫টি পেয়ার নির্বাচন করো।"); return; }
+
+ results.innerHTML = "";
+ status.textContent = "⏳ বিশ্লেষণ চলছে...";
+ button.disabled = true;
+ button.textContent = "ANALYZING...";
+
+ try {
+  for (const symbol of selected) {
+   const card = document.createElement("div");
+   card.className = "signal";
+   card.innerHTML = `<h3>${escapeHTML(symbol)}</h3><p>⏳ বিশ্লেষণ করা হচ্ছে...</p>`;
+   results.appendChild(card);
+
+   try {
+    const response = await fetch(`/predict?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+    const data = await response.json();
+    if (!response.ok || data.status === "error") throw new Error(data.message || "ডেটা পাওয়া যায়নি");
+
+    if (data.status === "market_closed") {
+     card.innerHTML = `<h3>💱 ${escapeHTML(symbol)}</h3><h2 class="MARKET">MARKET CLOSED</h2><p>${escapeHTML(data.message)}</p>`;
+     continue;
+    }
+    if (data.status !== "ok") throw new Error(data.message || "বিশ্লেষণ সম্ভব হয়নি");
+
+    const a = data.analysis || {};
+    const signal = ["UP","DOWN","WAIT"].includes(data.signal) ? data.signal : "WAIT";
+    const candleDate = data.last_closed_candle ? new Date(data.last_closed_candle.replace(" ","T")+"Z") : null;
+    const candleTime = candleDate && !isNaN(candleDate.getTime())
+     ? candleDate.toLocaleString("en-GB",{timeZone:"Asia/Dhaka",dateStyle:"medium",timeStyle:"medium"}) : "N/A";
+    const secs = interval==="1min"?60:interval==="5min"?300:900;
+
+    card.innerHTML = `
+     <h3>💱 ${escapeHTML(symbol)}</h3>
+     <h2 class="${signal}">${signal}</h2>
+     <p>⏱️ Timeframe: ${escapeHTML(interval)}</p>
+     <div class="live-time">🕒 Bangladesh Live Time: <span class="live-clock">Loading...</span></div>
+     <div class="indicator">🕯️ Signal Candle Time: ${escapeHTML(candleTime)}</div>
+     <div class="indicator">⏳ Next Candle Starts In: <span class="countdown" data-interval="${secs}">--:--</span></div>
+     <p>🧠 ${escapeHTML(a.reason || "N/A")}</p><hr>
+     <h3 class="section-title">📊 Technical Indicators</h3>
+     <div class="indicator">EMA 20: ${escapeHTML(a.ema20 ?? "N/A")}</div>
+     <div class="indicator">EMA 50: ${escapeHTML(a.ema50 ?? "N/A")}</div>
+     <div class="indicator">RSI 14: ${escapeHTML(a.rsi ?? "N/A")}</div>
+     <div class="indicator">MACD: ${escapeHTML(a.macd ?? "N/A")}</div>
+     <div class="indicator">MACD Signal: ${escapeHTML(a.macd_signal ?? "N/A")}</div>
+     <div class="indicator">MACD Histogram: ${escapeHTML(a.macd_histogram ?? "N/A")}</div>
+     <hr><h3 class="section-title">📍 Support & Resistance</h3>
+     <div class="indicator">Support: ${escapeHTML(a.support ?? "N/A")}</div>
+     <div class="indicator">Resistance: ${escapeHTML(a.resistance ?? "N/A")}</div>
+     <div class="indicator">Last Close: ${escapeHTML(a.last_close ?? "N/A")}</div>
+     <hr><h3 class="section-title">🎯 Analysis Score</h3>
+     <div class="score">
+      <div><h3 class="UP">${escapeHTML(a.bullish_score ?? 0)}</h3><p>Bullish</p></div>
+      <div><h3 class="DOWN">${escapeHTML(a.bearish_score ?? 0)}</h3><p>Bearish</p></div>
+     </div>
+     <hr><h3 class="section-title">🕯️ Candle Patterns</h3>
+     <p>${escapeHTML((a.patterns || []).join(", ") || "কোনো Pattern পাওয়া যায়নি")}</p>
+     <p class="note">⚠️ এটি নিয়মভিত্তিক বিশ্লেষণ; সিগন্যাল নিশ্চিত নয়। Twelve Data-এর দাম Quotex-এর দামের সঙ্গে পুরোপুরি নাও মিলতে পারে।</p>`;
+    updateLiveClock();
+    updateCountdowns();
+   } catch(error) {
+    card.innerHTML = `<h3>💱 ${escapeHTML(symbol)}</h3><p style="color:#ef4444">সমস্যা: ${escapeHTML(error.message)}</p>`;
+   }
+  }
+  status.textContent = "✅ বিশ্লেষণ সম্পন্ন";
+ } finally {
+  button.disabled = false;
+  button.textContent = "🔍 GET SIGNALS";
+ }
+}
+
+renderPairs();
+</script>
+</body>
+</html>
