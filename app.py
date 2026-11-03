@@ -839,6 +839,21 @@ def backtest():
         tested = 0
         skipped_missing_expiry = 0
         examples = []
+        direction_results = {
+            "UP": {"wins": 0, "losses": 0, "draws": 0},
+            "DOWN": {"wins": 0, "losses": 0, "draws": 0},
+        }
+        rsi_results = {
+            "below_30": {"wins": 0, "losses": 0, "draws": 0},
+            "30_to_70": {"wins": 0, "losses": 0, "draws": 0},
+            "above_70": {"wins": 0, "losses": 0, "draws": 0},
+        }
+        alignment_results = {
+            "ema_aligned": {"wins": 0, "losses": 0, "draws": 0},
+            "ema_not_aligned": {"wins": 0, "losses": 0, "draws": 0},
+            "macd_aligned": {"wins": 0, "losses": 0, "draws": 0},
+            "macd_not_aligned": {"wins": 0, "losses": 0, "draws": 0},
+        }
 
         # Start after enough history for the indicators. Never use future candles
         # when calculating the signal for a historical candle.
@@ -875,6 +890,26 @@ def backtest():
 
             counts[outcome] += 1
             tested += 1
+            result_key = outcome.lower() + "s" if outcome != "LOSS" else "losses"
+            direction_results[direction][result_key] += 1
+
+            rsi_value = float(analysis.get("rsi", 50))
+            rsi_bucket = "below_30" if rsi_value < 30 else ("above_70" if rsi_value > 70 else "30_to_70")
+            rsi_results[rsi_bucket][result_key] += 1
+
+            ema_aligned = (
+                float(analysis.get("ema20", 0)) > float(analysis.get("ema50", 0))
+                if direction == "UP"
+                else float(analysis.get("ema20", 0)) < float(analysis.get("ema50", 0))
+            )
+            macd_aligned = (
+                float(analysis.get("macd_histogram", 0)) > 0
+                if direction == "UP"
+                else float(analysis.get("macd_histogram", 0)) < 0
+            )
+            alignment_results["ema_aligned" if ema_aligned else "ema_not_aligned"][result_key] += 1
+            alignment_results["macd_aligned" if macd_aligned else "macd_not_aligned"][result_key] += 1
+
             if len(examples) < 20:
                 examples.append({
                     "signal_candle": current["datetime"],
@@ -896,6 +931,9 @@ def backtest():
             "available_closed_candles": len(closed),
             "signals_generated": signal_counts,
             "tested_signals": tested,
+            "direction_breakdown": direction_results,
+            "rsi_breakdown": rsi_results,
+            "indicator_alignment_breakdown": alignment_results,
             "wins": counts["WIN"],
             "losses": counts["LOSS"],
             "draws": counts["DRAW"],
