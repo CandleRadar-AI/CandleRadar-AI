@@ -652,7 +652,6 @@ def predict():
         }), 400
 
     # Weekend filter for forex pairs
-
     if "/" in symbol and is_forex_market_closed():
         return jsonify({
             "status": "market_closed",
@@ -666,9 +665,13 @@ def predict():
         })
 
     try:
+        # Fetch market candles
         all_candles = fetch_candles(symbol, interval, 100)
+
+        # Keep only closed candles
         closed = get_closed_candles(all_candles, interval)
 
+        # Check data freshness
         freshness = check_data_freshness(closed, interval)
 
         if not freshness["fresh"]:
@@ -677,6 +680,7 @@ def predict():
                 "symbol": symbol,
                 "interval": interval,
                 "signal": "WAIT",
+                "data_fresh": False,
                 "data_age_seconds": freshness["age_seconds"],
                 "last_closed_candle": (
                     closed[-1]["datetime"] if closed else None
@@ -684,19 +688,7 @@ def predict():
                 "message": freshness["message"]
             }), 200
 
-        if not freshness["fresh"]:
-            return jsonify({
-                "status": "stale_data",
-                "symbol": symbol,
-                "interval": interval,
-                "signal": "WAIT",
-                "data_age_seconds": freshness["age_seconds"],
-                "last_closed_candle": (
-                    closed[-1]["datetime"] if closed else None
-                ),
-                "message": freshness["message"]
-            }), 200
-
+        # Check minimum candle requirement
         if len(closed) < 60:
             return jsonify({
                 "status": "error",
@@ -706,10 +698,15 @@ def predict():
                 ),
             }), 503
 
+        # Evaluate previous pending signals
         evaluate_pending_signals(symbol, interval, closed)
+
+        # Analyze candles
         result = analyze_candles(closed)
+
         last_candle_time = closed[-1]["datetime"]
 
+        # Save current signal
         save_signal(
             symbol,
             interval,
@@ -717,6 +714,7 @@ def predict():
             result
         )
 
+        # Successful response
         return jsonify({
             "status": "ok",
             "symbol": symbol,
@@ -724,6 +722,9 @@ def predict():
             "signal": result["signal"],
             "analysis": result,
             "last_closed_candle": last_candle_time,
+            "data_fresh": freshness["fresh"],
+            "data_age_seconds": freshness["age_seconds"],
+            "data_message": freshness["message"],
             "model": "rule_based_v1",
             "message": (
                 "এটি সাধারণ নিয়মভিত্তিক বিশ্লেষণ; "
