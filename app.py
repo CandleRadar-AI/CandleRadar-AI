@@ -500,13 +500,40 @@ def analyze_candles(candles):
     if any(p in patterns for p in bearish_patterns):
         bearish_score += 1
 
+    # RSI extreme-zone safety filter.
+    # Do not block every RSI reading above 70/below 30: strong trends can
+    # remain overbought/oversold. Only block a fresh entry at extreme levels.
+    rsi_zone = "neutral"
+    if rsi >= 70:
+        rsi_zone = "overbought"
+    elif rsi <= 30:
+        rsi_zone = "oversold"
+
     if bullish_score >= 4 and bullish_score > bearish_score:
-        signal = "UP"
-        reason = "একাধিক সূচকে Bullish প্রবণতা পাওয়া গেছে।"
+        if rsi >= 80:
+            signal = "WAIT"
+            reason = (
+                "Bullish সূচক মিলেছে, কিন্তু RSI 80 বা তার বেশি। "
+                "দাম অতিরিক্ত বেড়ে থাকতে পারে; নতুন UP এন্ট্রির আগে অপেক্ষা করো।"
+            )
+        else:
+            signal = "UP"
+            reason = "একাধিক সূচকে Bullish প্রবণতা পাওয়া গেছে।"
+            if rsi >= 70:
+                reason += " RSI 70-এর ওপরে; অতিরিক্ত সতর্ক থাকো।"
 
     elif bearish_score >= 4 and bearish_score > bullish_score:
-        signal = "DOWN"
-        reason = "একাধিক সূচকে Bearish প্রবণতা পাওয়া গেছে।"
+        if rsi <= 20:
+            signal = "WAIT"
+            reason = (
+                "Bearish সূচক মিলেছে, কিন্তু RSI 20 বা তার কম। "
+                "দাম অতিরিক্ত নেমে থাকতে পারে; নতুন DOWN এন্ট্রির আগে অপেক্ষা করো।"
+            )
+        else:
+            signal = "DOWN"
+            reason = "একাধিক সূচকে Bearish প্রবণতা পাওয়া গেছে।"
+            if rsi <= 30:
+                reason += " RSI 30-এর নিচে; অতিরিক্ত সতর্ক থাকো।"
 
     else:
         signal = "WAIT"
@@ -517,6 +544,7 @@ def analyze_candles(candles):
         "ema20": round(ema20, 6),
         "ema50": round(ema50, 6),
         "rsi": round(rsi, 2),
+        "rsi_zone": rsi_zone,
         "macd": round(macd, 6),
         "macd_signal": round(signal_line, 6),
         "macd_histogram": round(macd_histogram, 6),
@@ -766,6 +794,119 @@ def predict():
             "status": "error",
             "message": str(error),
         }), 502
+
+
+# -------------------------
+# Historical backtesting
+# -------------------------
+
+@app.route("/backtest")
+def backtest():
+    """Test the current rule-based strategy on historical closed candles.
+
+    A signal is generated using candles available up to and including candle i.
+    Entry is candle i close; outcome is measured only at the exact next candle
+    close. Missing next candles are skipped rather than replaced with later data.
+    """
+    symbol = request.args.get("symbol", "EUR/USD").strip()
+    interval = request.args.get("interval", "1min").strip()
+    try:
+        requested = int(request.args.get("candles", "500"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "candles অবশ্যই সংখ্যা হতে হবে।"}), 400
+
+    if interval not in ALLOWED_INTERVALS:
+        return jsonify({"status": "error", "message": "Use 1min, 5min or 15min."}), 400
+    if not symbol or len(symbol) > 40:
+        return jsonify({"status": "error", "message": "সঠিক symbol দিন।"}), 400
+    if requested < 100 or requested > 2000:
+        return jsonify({"status": "error", "message": "candles 100 থেকে 2000-এর মধ্যে দিন।"}), 400
+
+    try:
+        raw = fetch_candles(symbol, interval, requested)
+        closed = get_closed_candles(raw, interval)
+        if len(closed) < 61:
+            return jsonify({
+                "status": "error",
+                "message": "Backtesting-এর জন্য কমপক্ষে ৬১টি বন্ধ ক্যান্ডেল দরকার।",
+                "available_closed_candles": len(closed),
+            }), 503
+
+        by_time = {c["datetime"]: c for c in closed}
+        duration = ALLOWED_INTERVALS[interval]
+        counts = {"WIN": 0, "LOSS": 0, "DRAW": 0}
+        signal_counts = {"UP": 0, "DOWN": 0, "WAIT": 0}
+        tested = 0
+        skipped_missing_expiry = 0
+        examples = []
+
+        # Start after enough history for the indicators. Never use future candles
+        # when calculating the signal for a historical candle.
+        for i in range(59, len(closed) - 1):
+            history = closed[:i + 1]
+            current = history[-1]
+            try:
+                analysis = analyze_candles(history)
+            except (ValueError, KeyError, TypeError):
+                continue
+
+            direction = analysis.get("signal")
+            if direction not in signal_counts:
+                continue
+            signal_counts[direction] += 1
+            if direction == "WAIT":
+                continue
+
+            expiry_dt = _parse_candle_time(current["datetime"]) + timedelta(seconds=duration)
+            expiry_key = expiry_dt.strftime("%Y-%m-%d %H:%M:%S")
+            expiry_candle = by_time.get(expiry_key)
+            if expiry_candle is None:
+                skipped_missing_expiry += 1
+                continue
+
+            entry = float(current["close"])
+            exit_price = float(expiry_candle["close"])
+            if exit_price == entry:
+                outcome = "DRAW"
+            elif direction == "UP":
+                outcome = "WIN" if exit_price > entry else "LOSS"
+            else:
+                outcome = "WIN" if exit_price < entry else "LOSS"
+
+            counts[outcome] += 1
+            tested += 1
+            if len(examples) < 20:
+                examples.append({
+                    "signal_candle": current["datetime"],
+                    "expiry_candle": expiry_key,
+                    "signal": direction,
+                    "entry_price": entry,
+                    "expiry_close": exit_price,
+                    "result": outcome,
+                })
+
+        decisive = counts["WIN"] + counts["LOSS"]
+        win_rate = round(counts["WIN"] / decisive * 100, 2) if decisive else 0
+        return jsonify({
+            "status": "ok",
+            "symbol": symbol,
+            "interval": interval,
+            "expiry": f"{duration} seconds (next candle close)",
+            "requested_candles": requested,
+            "available_closed_candles": len(closed),
+            "signals_generated": signal_counts,
+            "tested_signals": tested,
+            "wins": counts["WIN"],
+            "losses": counts["LOSS"],
+            "draws": counts["DRAW"],
+            "skipped_missing_expiry": skipped_missing_expiry,
+            "win_rate": win_rate,
+            "win_rate_basis": "wins / (wins + losses); draws excluded",
+            "sample_warning": "এটি অতীতের ডেটায় নিয়মভিত্তিক backtest; ভবিষ্যৎ ফল বা লাভের নিশ্চয়তা নয়। Spread, payout, execution delay ও Quotex-এর আলাদা price feed এতে অন্তর্ভুক্ত নয়।",
+            "sample_trades": examples,
+        })
+    except (ValueError, requests.RequestException) as error:
+        return jsonify({"status": "error", "message": str(error)}), 502
 
 
 # -------------------------
