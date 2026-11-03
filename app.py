@@ -49,11 +49,16 @@ def check_data_freshness(candles, interval):
         candle_close_time = latest + duration
         now = datetime.now(timezone.utc)
 
-        age_seconds = max(
-            0,
-            int((now - candle_close_time).total_seconds())
-        )
+        raw_age = (now - candle_close_time).total_seconds()
+        if raw_age < -5:
+            return {
+                "fresh": False,
+                "age_seconds": None,
+                "latest_candle": candles[-1]["datetime"],
+                "message": "ক্যান্ডেলের সময় ভবিষ্যতের; ডেটা যাচাই করা যাচ্ছে না।",
+            }
 
+        age_seconds = max(0, int(raw_age))
         max_delay = MAX_DATA_DELAY_SECONDS[interval]
 
         return {
@@ -98,6 +103,7 @@ def init_db():
                 candle_time TEXT NOT NULL,
                 signal TEXT NOT NULL,
                 entry_price REAL NOT NULL,
+                expiry_candle_time TEXT,
                 result TEXT NOT NULL DEFAULT 'PENDING',
                 created_at TEXT NOT NULL,
                 UNIQUE(symbol, interval, candle_time)
@@ -106,6 +112,12 @@ def init_db():
 
 
 init_db()
+
+# Safe migration for databases created by older app versions.
+with sqlite3.connect(DB_NAME) as _conn:
+    _columns = {row[1] for row in _conn.execute("PRAGMA table_info(signals)")}
+    if "expiry_candle_time" not in _columns:
+        _conn.execute("ALTER TABLE signals ADD COLUMN expiry_candle_time TEXT")
 
 
 # -------------------------
@@ -522,75 +534,87 @@ def analyze_candles(candles):
 # Save signal
 # -------------------------
 
-def save_signal(symbol, interval, candle_time, result):
+def _parse_candle_time(value):
+    """Parse Twelve Data UTC candle timestamps safely."""
+    return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=timezone.utc
+    )
 
+
+def save_signal(symbol, interval, candle_time, result):
+    """Save a signal and its exact next-candle expiry target."""
     if result["signal"] not in ("UP", "DOWN"):
         return
+
+    expiry_time = _parse_candle_time(candle_time) + timedelta(
+        seconds=ALLOWED_INTERVALS[interval]
+    )
+    expiry_candle_time = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
 
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute("""
             INSERT OR IGNORE INTO signals
-            (
-                symbol,
-                interval,
-                candle_time,
-                signal,
-                entry_price,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
+            (symbol, interval, candle_time, signal, entry_price,
+             expiry_candle_time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            symbol,
-            interval,
-            candle_time,
-            result["signal"],
-            result["last_close"],
+            symbol, interval, candle_time, result["signal"],
+            float(result["last_close"]), expiry_candle_time,
             datetime.now(timezone.utc).isoformat(),
         ))
 
 
-# -------------------------
-# Evaluate pending signals
-# -------------------------
-
 def evaluate_pending_signals(symbol, interval, candles):
-
+    """Resolve each signal only against its own exact expiry candle close."""
     if not candles:
         return
 
-    latest_time = candles[-1]["datetime"]
-    latest_close = float(candles[-1]["close"])
+    candle_closes = {}
+    for candle in candles:
+        try:
+            candle_closes[candle["datetime"]] = float(candle["close"])
+        except (KeyError, TypeError, ValueError):
+            continue
 
     with sqlite3.connect(DB_NAME) as conn:
         pending = conn.execute("""
-            SELECT id, candle_time, signal, entry_price
+            SELECT id, candle_time, signal, entry_price, expiry_candle_time
             FROM signals
-            WHERE symbol = ?
-              AND interval = ?
-              AND result = 'PENDING'
-              AND candle_time < ?
-        """, (
-            symbol,
-            interval,
-            latest_time
-        )).fetchall()
+            WHERE symbol = ? AND interval = ? AND result = 'PENDING'
+        """, (symbol, interval)).fetchall()
 
-        for row in pending:
-            signal_id, candle_time, signal, entry_price = row
+        for signal_id, candle_time, signal, entry_price, expiry_time in pending:
+            # Older records are migrated by calculating their intended expiry.
+            if not expiry_time:
+                try:
+                    expiry_time = (
+                        _parse_candle_time(candle_time)
+                        + timedelta(seconds=ALLOWED_INTERVALS[interval])
+                    ).strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        "UPDATE signals SET expiry_candle_time = ? WHERE id = ?",
+                        (expiry_time, signal_id),
+                    )
+                except (KeyError, ValueError):
+                    continue
 
-            if signal == "UP":
-                outcome = "WIN" if latest_close > entry_price else "LOSS"
+            # Do not use a later candle as a substitute. Wait until exact expiry candle exists.
+            expiry_close = candle_closes.get(expiry_time)
+            if expiry_close is None:
+                continue
+
+            entry = float(entry_price)
+            if expiry_close == entry:
+                outcome = "DRAW"
+            elif signal == "UP":
+                outcome = "WIN" if expiry_close > entry else "LOSS"
             else:
-                outcome = "WIN" if latest_close < entry_price else "LOSS"
+                outcome = "WIN" if expiry_close < entry else "LOSS"
 
             conn.execute("""
-                UPDATE signals
-                SET result = ?
+                UPDATE signals SET result = ?
                 WHERE id = ? AND result = 'PENDING'
-            """, (
-                outcome,
-                signal_id
-            ))
+            """, (outcome, signal_id))
 
 
 # -------------------------
@@ -619,13 +643,18 @@ def candles_endpoint():
         }), 400
 
     try:
-        candles = fetch_candles(symbol, interval, 20)
+        all_candles = fetch_candles(symbol, interval, 100)
+        candles = get_closed_candles(all_candles, interval)
+        freshness = check_data_freshness(candles, interval)
 
         return jsonify({
             "status": "ok",
             "symbol": symbol,
             "interval": interval,
-            "candles": candles,
+            "candles": candles[-20:],
+            "data_fresh": freshness["fresh"],
+            "data_age_seconds": freshness["age_seconds"],
+            "data_message": freshness["message"],
         })
 
     except (ValueError, requests.RequestException) as error:
@@ -763,7 +792,11 @@ def stats():
             "SELECT COUNT(*) FROM signals WHERE result = 'PENDING'"
         ).fetchone()[0]
 
-    completed = wins + losses
+        draws = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE result = 'DRAW'"
+        ).fetchone()[0]
+
+    completed = wins + losses + draws
 
     win_rate = (
         round((wins / completed) * 100, 2)
@@ -775,8 +808,11 @@ def stats():
         "total_signals": total,
         "wins": wins,
         "losses": losses,
+        "draws": draws,
         "pending": pending,
+        "completed": completed,
         "win_rate": win_rate,
+        "win_rate_basis": "wins / (wins + losses); draws excluded",
     })
 
 
@@ -787,6 +823,5 @@ def stats():
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 
-        5000))
-            )
+        port=int(os.getenv("PORT", "5000")),
+    )
